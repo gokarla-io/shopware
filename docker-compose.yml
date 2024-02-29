@@ -1,0 +1,28 @@
+version: "3.8"
+
+networks:
+  dockware:
+    driver: bridge
+
+services:
+  dockware:
+    container_name: dockware
+    image: dockware/dev:latest
+    environment:
+      - XDEBUG_ENABLED=1
+    networks:
+      - dockware
+    ports:
+      - "80:80"
+      - "35060:3306"
+      - "2222:22"
+      - "8888:8888"
+      - "9999:9999"
+      - "9998:9998"
+    volumes:
+      - "./:/var/www/html/custom/plugins/KarlaDelivery/"
+      - dockware_db_volume:/var/lib/mysql
+
+volumes:
+  dockware_db_volume:
+    driver: local

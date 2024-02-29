@@ -1,0 +1,30 @@
+#!/bin/sh
+
+echo "Running pre-commit hook: make format"
+
+make format
+
+# Check the exit status of the make format command
+if [ $? -ne 0 ]; then
+ echo "Unable to automatically format repo files."
+ exit 1
+fi
+
+echo "Files automatically formatted."
+
+echo "Running pre-commit hook: make lint"
+
+# If there is at least one PHP file, run `make lint`
+if [ "$(git diff --cached --name-only --diff-filter=d | grep -c -E '^.*\.php$')" -gt 0 ]; then
+  echo "Running make lint due to staged PHP files..."
+
+  make lint
+
+  # Check the exit status of the make validate command
+  if [ $? -ne 0 ]; then
+   echo "Validation failed."
+   exit 1
+  fi
+
+  echo "Validation passed."
+fi

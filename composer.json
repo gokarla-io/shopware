@@ -1,0 +1,43 @@
+{
+  "name": "karla/delivery",
+  "description": "Automatically transmit orders from your shop to Karla, providing precise and timely updates to your customers and improving the post-purchase experience.",
+  "version": "1.0.0",
+  "type": "shopware-platform-plugin",
+  "license": "Apache 2.0",
+  "authors": [
+    {
+      "name": "GoKarla GmbH"
+    }
+  ],
+  "require": {
+    "shopware/core": "*",
+    "shopware/administration": "*",
+    "shopware/storefront": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "Karla\\Delivery\\": "src/"
+    }
+  },
+  "extra": {
+    "shopware-plugin-class": "Karla\\Delivery\\KarlaDelivery",
+    "copyright": "(c) by GoKarla GmbH",
+    "label": {
+      "de-DE": "Karla Delivery",
+      "en-GB": "Karla Delivery"
+    },
+    "description": {
+      "de-DE": "Automatische Übertragung von Bestell- und Versandereignissen aus Ihrem Shop an Karla für präzise, zeitnahe Kundenupdates. Verbessert das Kundenerlebnis nach Kauf.",
+      "en-GB": "Automatically transmit orders from your shop to Karla, providing precise and timely updates to your customers and improving the post-purchase experience."
+    }
+  },
+  "require-dev": {
+    "squizlabs/php_codesniffer": "^3.9",
+    "phpunit/phpunit": "^11.0"
+  },
+  "config": {
+    "allow-plugins": {
+      "symfony/runtime": true
+    }
+  }
+}
