@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="https://raw.githubusercontent.com/shopware/shopware/trunk/src/Core/System/SystemConfig/Schema/config.xsd">
+    <card>
+        <title>API Config</title>
+        <title lang="de-DE">API-Konfiguration</title>
+        <input-field>
+            <name>merchantSlug</name>
+            <label>Your Karla Merchant Slug</label>
+            <label lang="de-DE">Dein Karla Merchant Slug</label>
+            <helpText>Unique identifier for your Karla merchant account.</helpText>
+            <helpText lang="de-DE">Eindeutiger Bezeichner für dein Karla-Händlerkonto.</helpText>
+        </input-field>
+        <input-field type="password">
+            <name>apiKey</name>
+            <label>Your Karla API key</label>
+            <label lang="de-DE">Dein Karla API-Schlüssel</label>
+            <helpText>Your API key for authenticating with Karla's services.</helpText>
+            <helpText lang="de-DE">Dein API-Schlüssel zur Authentifizierung bei Karlas Diensten.</helpText>
+        </input-field>
+        <input-field>
+            <name>apiUrl</name>
+            <label>Your target Karla API base url</label>
+            <label lang="de-DE">Deine Ziel-Karla-API-Basis-URL</label>
+            <helpText>The base URL for Karla's API endpoints.</helpText>
+            <helpText lang="de-DE">Die Basis-URL für Karlas API-Endpunkte.</helpText>
+            <defaultValue>https://api.gokarla.io</defaultValue>
+        </input-field>
+    </card>
+    <card>
+        <title>Shop events</title>
+        <title lang="de-DE">Shop-Ereignisse</title>
+        <input-field type="bool">
+            <name>sendOrderPlacements</name>
+            <label>Send Order Placements</label>
+            <label lang="de-DE">Bestellungsereignisse senden</label>
+            <helpText>Toggle sending order placement events.</helpText>
+            <helpText lang="de-DE">Umschalten, ob Bestellungsereignisse gesendet werden sollen.</helpText>
+            <defaultValue>true</defaultValue>
+        </input-field>
+    </card>
+</config>
