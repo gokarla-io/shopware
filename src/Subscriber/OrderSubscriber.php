@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Karla\Delivery\Subscriber;
 
 use DateTimeInterface;
+use Shopware\Core\Content\Media\MediaEntity;
+use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
+use Shopware\Core\Content\Product\ProductEntity;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
@@ -133,9 +136,14 @@ class OrderSubscriber implements EventSubscriberInterface
                     )
                 );
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $t) {
             $this->logger->error(
-                sprintf('[Karla] Unexpected error: %s.', $e->getMessage())
+                sprintf(
+                    '[Karla] Unexpected error: %s. File: %s, Line: %s',
+                    $t->getMessage(),
+                    $t->getFile(),
+                    $t->getLine()
+                )
             );
         }
         $this->logger->info(
@@ -208,7 +216,7 @@ class OrderSubscriber implements EventSubscriberInterface
             'discount_price' => $lineItemDetails['discountPrice'],
             'discounts' => $lineItemDetails['discounts'],
             'email_id' => $customerEmail,
-            'address' => $this->readAddress($order->getAddresses()->first()),
+            'address' => ($address = $order->getAddresses()->first()) ? $this->readAddress($address) : null,
             'currency' => $currencyCode,
             'external_id' => $order->getId(),
         ];
@@ -229,26 +237,29 @@ class OrderSubscriber implements EventSubscriberInterface
         $discountPrice = 0.0;
 
         foreach ($lineItems as $lineItem) {
+            $price = $lineItem->getPrice();
+            $payload = $lineItem->getPayload();
             if ($lineItem->getType() === 'product') {
                 $subTotalPrice += $lineItem->getTotalPrice();
-                // Retrieve product image if available
-                $cover = $lineItem->getProduct()->getCover();
+                $product = $lineItem->getProduct();
+                $cover = $product instanceof ProductEntity ? $lineItem->getProduct()->getCover() : null;
+                $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
                 $products[] = [
                     'title' => $lineItem->getLabel(),
                     'quantity' => $lineItem->getQuantity(),
-                    'price' => $lineItem->getPrice()->getUnitPrice(),
-                    'images' => $cover ? [[
-                        'src' => $cover->getMedia()->getUrl(),
-                        'alt' => $cover->getMedia()->getAlt()
+                    'price' => $price instanceof CalculatedPrice ? $price->getUnitPrice() : null,
+                    'images' => $cover instanceof ProductMediaEntity ? [[
+                        'src' => $media instanceof MediaEntity ? $media->getUrl() : null,
+                        'alt' => $media instanceof MediaEntity ? $media->getAlt() : null
                     ]] : [],
                 ];
             } elseif ($lineItem->getType() === 'promotion') {
                 $discountPrice += abs($lineItem->getTotalPrice());
                 $promotion = $lineItem->getPromotion();
                 $discounts[] = [
-                    'code' => $promotion->getCode() ?? null,
-                    'amount' => $lineItem->getPrice()->getTotalPrice(),
-                    'type' => $lineItem->getPayload()["discountType"] ?? null,
+                    'code' => $promotion instanceof PromotionEntity ? $promotion->getCode() : null,
+                    'amount' => $price instanceof CalculatedPrice ? $price->getTotalPrice() : null,
+                    'type' => is_array($payload) ? $payload["discountType"] : null,
                 ];
             }
         }

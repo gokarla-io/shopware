@@ -37,7 +37,7 @@ build: init ## build files for distribution
 	mkdir -p dist/KarlaDelivery/src
 	cp -r src dist/KarlaDelivery/
 	cp composer.json dist/KarlaDelivery/composer.json
-	zip -r dist/KarlaDelivery.zip dist/KarlaDelivery
+	cd dist && zip -r KarlaDelivery.zip KarlaDelivery
 
 lint: init ## lint syntax code
 	vendor/bin/phpcs src/
