@@ -2,20 +2,25 @@
 
 namespace Karla\Delivery\Tests\Subscriber;
 
+use JsonSerializable;
 use Karla\Delivery\Subscriber\OrderSubscriber;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Cart\Price\Struct\CalculatedPrice;
+use Shopware\Core\Checkout\Cart\Price\Struct\CartPrice;
 use Shopware\Core\Checkout\Promotion\PromotionEntity;
 use Shopware\Core\Content\Media\MediaEntity;
 use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
 use Shopware\Core\Content\Product\ProductEntity;
+use Shopware\Core\Framework\Api\Context\ContextSource;
+use Shopware\Core\Framework\Api\Context\SalesChannelApiSource;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityWriteResult;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\Checkout\Order\OrderDefinition;
+use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
@@ -70,6 +75,8 @@ class OrderSubscriberTest extends TestCase
         );
         // Mock order repository
         $criteria = new Criteria([$orderId]);
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(10.00);
         $orderEntity = $this->createMock(OrderEntity::class);
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
@@ -77,13 +84,10 @@ class OrderSubscriberTest extends TestCase
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')
             ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
-        $priceMock = $this->createMock(CalculatedPrice::class);
-        $priceMock->method('getTotalPrice')->willReturn(10.00);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
         $productLineItemMock = $this->createMock(OrderLineItemEntity::class);
         $productLineItemMock->method('getId')->willReturn(Uuid::randomHex());
-        $productLineItemMock->method('getPrice')->willReturn($priceMock);
         $productLineItemMock->method('getType')->willReturn('promotion');
-        $productLineItemMock->method('getPayload')->willReturn(['discountType' => 'percentage']);
         $coverMock = $this->createMock(ProductMediaEntity::class);
         $mediaMock = $this->createMock(MediaEntity::class);
         $mediaMock->method('getUrl')->willReturn('https://example.com/image.jpg');
@@ -94,9 +98,8 @@ class OrderSubscriberTest extends TestCase
         $productLineItemMock->method('getProduct')->willReturn($productMock);
         $promotionLineItemMock = $this->createMock(OrderLineItemEntity::class);
         $promotionLineItemMock->method('getId')->willReturn(Uuid::randomHex());
-        $promotionLineItemMock->method('getPrice')->willReturn($priceMock);
         $promotionLineItemMock->method('getType')->willReturn('promotion');
-        $promotionLineItemMock->method('getPayload')->willReturn(['discountType' => 'percentage']);
+        $promotionLineItemMock->method('getPayload')->willReturn(['discountType' => 'percentage', 'code' => 'discountCode']);
         $promotionMock = $this->createMock(PromotionEntity::class);
         $promotionMock->method('getCode')->willReturn("discount");
         $promotionLineItemMock->method('getPromotion')->willReturn($promotionMock);
@@ -117,7 +120,8 @@ class OrderSubscriberTest extends TestCase
         $orderEntity->method('getAddresses')->willReturn($addressCollection);
         $orderCollection = new EntityCollection([$orderEntity]);
 
-        $context = Context::createDefaultContext();
+        $context = $this->createMock(Context::class);
+        $context->method('getSource')->willReturn($this->createMock(SalesChannelApiSource::class));
         $entitySearchResult = new EntitySearchResult(
             OrderDefinition::ENTITY_NAME,
             1, // total results
@@ -167,13 +171,12 @@ class OrderSubscriberTest extends TestCase
         $productLineItemMock->method('getId')->willReturn(Uuid::randomHex());
         $productLineItemMock->method('getPrice')->willReturn(null);
         $productLineItemMock->method('getType')->willReturn('promotion');
-        $productLineItemMock->method('getPayload')->willReturn(['discountType' => 'percentage']);
         $productLineItemMock->method('getProduct')->willReturn(null);
         $promotionLineItemMock = $this->createMock(OrderLineItemEntity::class);
         $promotionLineItemMock->method('getId')->willReturn(Uuid::randomHex());
         $promotionLineItemMock->method('getPrice')->willReturn(null);
         $promotionLineItemMock->method('getType')->willReturn('promotion');
-        $promotionLineItemMock->method('getPayload')->willReturn(['discountType' => 'percentage']);
+        $promotionLineItemMock->method('getPayload')->willReturn(['discountType' => 'percentage', 'code' => 'discountCode']);
         $promotionLineItemMock->method('getPromotion')->willReturn(null);
         $lineItemsCollection = new OrderLineItemCollection([$productLineItemMock, $promotionLineItemMock]);
         $orderEntity->method('getLineItems')->willReturn($lineItemsCollection);
@@ -192,7 +195,8 @@ class OrderSubscriberTest extends TestCase
         $orderEntity->method('getAddresses')->willReturn($addressCollection);
         $orderCollection = new EntityCollection([$orderEntity]);
 
-        $context = Context::createDefaultContext();
+        $context = $this->createMock(Context::class);
+        $context->method('getSource')->willReturn($this->createMock(SalesChannelApiSource::class));
         $entitySearchResult = new EntitySearchResult(
             OrderDefinition::ENTITY_NAME,
             1, // total results

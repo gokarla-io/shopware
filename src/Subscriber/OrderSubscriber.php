@@ -8,6 +8,7 @@ use DateTimeInterface;
 use Shopware\Core\Content\Media\MediaEntity;
 use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
 use Shopware\Core\Content\Product\ProductEntity;
+use Shopware\Core\Framework\Api\Context\AdminApiSource;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
@@ -104,11 +105,26 @@ class OrderSubscriber implements EventSubscriberInterface
     {
         try {
             if ($this->sendOrderPlacements) {
+                $context = $event->getContext();
+                $source = $context->getSource();
                 $orderIds = $event->getIds();
+
+                if ($source instanceof AdminApiSource) {
+                    $this->logger->info(
+                        sprintf(
+                            '[Karla] Order Event ids %s detected when triggered from the admin interface. Skipping...',
+                            json_encode($orderIds),
+                            $source
+                        )
+                    );
+                    return;
+                }
+
                 $this->logger->info(
                     sprintf(
-                        '[Karla] Order Event ids %s detected, processing...',
+                        '[Karla] Order Event ids %s detected (source %s). Processing...',
                         json_encode($orderIds),
+                        json_encode($source->jsonSerialize())
                     )
                 );
 
@@ -123,7 +139,7 @@ class OrderSubscriber implements EventSubscriberInterface
                     ['lineItems.product', 'lineItems.product.cover', 'lineItems.product.cover.media']
                 );
 
-                $orders = $this->orderRepository->search($criteria, $event->getContext());
+                $orders = $this->orderRepository->search($criteria, $context);
 
                 foreach ($orders as $order) {
                     $this->placeKarlaOrder($order);
@@ -210,7 +226,7 @@ class OrderSubscriber implements EventSubscriberInterface
             'order_number' => $order->getOrderNumber(),
             'order_placed_at' => $order->getCreatedAt()->format(DateTimeInterface::ATOM),
             'products' => $lineItemDetails['products'],
-            'total_order_price' => $order->getAmountTotal(),
+            'total_order_price' => $order->getPrice()->getTotalPrice(),
             'shipping_price' => $order->getShippingTotal(),
             'sub_total_price' => $lineItemDetails['subTotalPrice'],
             'discount_price' => $lineItemDetails['discountPrice'],
@@ -237,7 +253,6 @@ class OrderSubscriber implements EventSubscriberInterface
         $discountPrice = 0.0;
 
         foreach ($lineItems as $lineItem) {
-            $price = $lineItem->getPrice();
             $payload = $lineItem->getPayload();
             if ($lineItem->getType() === 'product') {
                 $subTotalPrice += $lineItem->getTotalPrice();
@@ -247,7 +262,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 $products[] = [
                     'title' => $lineItem->getLabel(),
                     'quantity' => $lineItem->getQuantity(),
-                    'price' => $price instanceof CalculatedPrice ? $price->getUnitPrice() : null,
+                    'price' => $lineItem->getUnitPrice(),
                     'images' => $cover instanceof ProductMediaEntity ? [[
                         'src' => $media instanceof MediaEntity ? $media->getUrl() : null,
                         'alt' => $media instanceof MediaEntity ? $media->getAlt() : null
@@ -255,11 +270,10 @@ class OrderSubscriber implements EventSubscriberInterface
                 ];
             } elseif ($lineItem->getType() === 'promotion') {
                 $discountPrice += abs($lineItem->getTotalPrice());
-                $promotion = $lineItem->getPromotion();
                 $discounts[] = [
-                    'code' => $promotion instanceof PromotionEntity ? $promotion->getCode() : null,
-                    'amount' => $price instanceof CalculatedPrice ? $price->getTotalPrice() : null,
-                    'type' => is_array($payload) ? $payload["discountType"] : null,
+                    'code' => is_array($payload) ? $payload['code'] : "",
+                    'amount' => $lineItem->getTotalPrice(),
+                    'type' => is_array($payload) ? $payload['discountType'] : null,
                 ];
             }
         }
