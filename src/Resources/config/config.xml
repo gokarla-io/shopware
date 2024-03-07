@@ -39,4 +39,16 @@
             <defaultValue>true</defaultValue>
         </input-field>
     </card>
+    <card>
+        <title>Mappings</title>
+        <title lang="de-DE">Mappings</title>
+        <input-field>
+            <name>depositLineItemType</name>
+            <label>The type of line item that should be considered as a deposit for the order</label>
+            <label lang="de-DE">Der Typ des Line Items, der als Pfand für die Bestellung angesehen werden sollte</label>
+            <helpText>For instance, a deposit for a beverage that is purchased.</helpText>
+            <helpText lang="de-DE">Zum Beispiel ein Pfand für ein gekauftes Getränk.</helpText>
+            <defaultValue></defaultValue>
+        </input-field>
+    </card>
 </config>

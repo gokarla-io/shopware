@@ -6,13 +6,11 @@ use JsonSerializable;
 use Karla\Delivery\Subscriber\OrderSubscriber;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
-use Shopware\Core\Checkout\Cart\Price\Struct\CalculatedPrice;
 use Shopware\Core\Checkout\Cart\Price\Struct\CartPrice;
 use Shopware\Core\Checkout\Promotion\PromotionEntity;
 use Shopware\Core\Content\Media\MediaEntity;
 use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
 use Shopware\Core\Content\Product\ProductEntity;
-use Shopware\Core\Framework\Api\Context\ContextSource;
 use Shopware\Core\Framework\Api\Context\SalesChannelApiSource;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
@@ -20,7 +18,6 @@ use Shopware\Core\Framework\DataAbstractionLayer\EntityWriteResult;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\Checkout\Order\OrderDefinition;
-use Shopware\Core\System\SalesChannel\SalesChannelContext;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
@@ -55,6 +52,7 @@ class OrderSubscriberTest extends TestCase
             ['KarlaDelivery.config.apiKey', null, 'testKey'],
             ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
             ['KarlaDelivery.config.sendOrderPlacements', null, true],
+            ['KarlaDelivery.config.depositLineItemType', null, ""],
         ]);
     }
 

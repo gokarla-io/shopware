@@ -65,6 +65,11 @@ class OrderSubscriber implements EventSubscriberInterface
     private bool $sendOrderPlacements;
 
     /**
+     * @var string
+     */
+    private string $depositLineItemType;
+
+    /**
      * OrderSubscriber constructor.
      * @param SystemConfigService $systemConfigService
      * @param LoggerInterface $logger
@@ -86,6 +91,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $this->apiKey = $systemConfigService->get('KarlaDelivery.config.apiKey');
         $this->apiUrl = $systemConfigService->get('KarlaDelivery.config.apiUrl');
         $this->sendOrderPlacements = $systemConfigService->get('KarlaDelivery.config.sendOrderPlacements');
+        $this->depositLineItemType = $systemConfigService->get('KarlaDelivery.config.depositLineItemType');
     }
 
     /**
@@ -254,7 +260,7 @@ class OrderSubscriber implements EventSubscriberInterface
 
         foreach ($lineItems as $lineItem) {
             $payload = $lineItem->getPayload();
-            if ($lineItem->getType() === 'product') {
+            if (in_array($lineItem->getType(), ['product', $this->depositLineItemType])) {
                 $subTotalPrice += $lineItem->getTotalPrice();
                 $product = $lineItem->getProduct();
                 $cover = $product instanceof ProductEntity ? $lineItem->getProduct()->getCover() : null;
