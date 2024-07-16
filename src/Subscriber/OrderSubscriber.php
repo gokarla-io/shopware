@@ -47,7 +47,7 @@ class OrderSubscriber implements EventSubscriberInterface
     /**
      * @var string
      */
-    private string $merchantSlug;
+    private string $shopSlug;
 
     /**
      * @var string
@@ -87,7 +87,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $this->httpClient = $httpClient;
 
         // Plugin Configuration
-        $this->merchantSlug = $systemConfigService->get('KarlaDelivery.config.merchantSlug');
+        $this->shopSlug = $systemConfigService->get('KarlaDelivery.config.shopSlug');
         $this->apiKey = $systemConfigService->get('KarlaDelivery.config.apiKey');
         $this->apiUrl = $systemConfigService->get('KarlaDelivery.config.apiUrl');
         $this->sendOrderPlacements = $systemConfigService->get('KarlaDelivery.config.sendOrderPlacements');
@@ -182,9 +182,9 @@ class OrderSubscriber implements EventSubscriberInterface
     private function placeKarlaOrder(OrderEntity $order): void
     {
         $orderData = $this->readOrder($order);
-        $url = $this->apiUrl . '/v1/orders';
+        $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
 
-        $auth = base64_encode($this->merchantSlug . ':' . $this->apiKey);
+        $auth = base64_encode($this->shopSlug . ':' . $this->apiKey);
         $headers = [
             'Authorization' => 'Basic ' . $auth,
             'Content-Type' => 'application/json',

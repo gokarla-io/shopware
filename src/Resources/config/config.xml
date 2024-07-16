@@ -5,11 +5,11 @@
         <title>API Config</title>
         <title lang="de-DE">API-Konfiguration</title>
         <input-field>
-            <name>merchantSlug</name>
-            <label>Your Karla Merchant Slug</label>
-            <label lang="de-DE">Dein Karla Merchant Slug</label>
-            <helpText>Unique identifier for your Karla merchant account.</helpText>
-            <helpText lang="de-DE">Eindeutiger Bezeichner für dein Karla-Händlerkonto.</helpText>
+            <name>shopSlug</name>
+            <label>Your Karla Shop Slug</label>
+            <label lang="de-DE">Dein Karla Shop Slug</label>
+            <helpText>Unique identifier for your Karla shop.</helpText>
+            <helpText lang="de-DE">Eindeutiger Bezeichner für dein Karla-Shop.</helpText>
         </input-field>
         <input-field type="password">
             <name>apiKey</name>

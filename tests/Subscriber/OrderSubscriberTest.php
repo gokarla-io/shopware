@@ -48,7 +48,7 @@ class OrderSubscriberTest extends TestCase
 
         // Configure systemConfigServiceMock to return expected values for configurations
         $this->systemConfigServiceMock->method('get')->willReturnMap([
-            ['KarlaDelivery.config.merchantSlug', null, 'testSlug'],
+            ['KarlaDelivery.config.shopSlug', null, 'testSlug'],
             ['KarlaDelivery.config.apiKey', null, 'testKey'],
             ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
             ['KarlaDelivery.config.sendOrderPlacements', null, true],
@@ -224,7 +224,7 @@ class OrderSubscriberTest extends TestCase
         $this->httpClientMock->expects(
             $this->once())->method('request')->with(
                 $this->equalTo('POST'),
-                $this->equalTo('https://api.example.com/v1/orders'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
                 $this->anything()
             )
             ->willReturn($responseMock);
@@ -250,7 +250,7 @@ class OrderSubscriberTest extends TestCase
         $this->httpClientMock->expects(
             $this->once())->method('request')->with(
                 $this->equalTo('POST'),
-                $this->equalTo('https://api.example.com/v1/orders'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
                 $this->anything()
             )
             ->willReturn($responseMock);
