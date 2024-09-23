@@ -4,11 +4,13 @@ Simplify your purchase experience in [Shopware](https://www.shopware.com/en/) wi
 
 ## Features
 
-- Automatically place orders in the Karla systems using your API key
+- Place orders created through the storefront (submitted cart by the user).
+- Fulfill orders if a tracking code is detected when editing in the admin panel.
 
 ## Requirements
 
 - Shopware 6
+- A Karla REST API Key. See [Authentication](https://docs.gokarla.io/docs/api/authentication).
 
 To see the list of prerequisites to run this project locally:
 
