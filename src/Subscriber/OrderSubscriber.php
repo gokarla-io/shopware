@@ -22,6 +22,7 @@ use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryCollection
 use Shopware\Core\Checkout\Order\Aggregate\OrderDeliveryPosition\OrderDeliveryPositionCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemCollection;
 use Shopware\Core\Checkout\Order\OrderEntity;
+use Shopware\Core\Checkout\Shipping\ShippingMethodEntity;
 use Shopware\Core\System\Country\Aggregate\CountryState\CountryStateEntity;
 use Shopware\Core\System\Country\CountryEntity;
 
@@ -192,18 +193,18 @@ class OrderSubscriber implements EventSubscriberInterface
                     $this->logger->info('[Karla] Order placement is disabled.');
                     return;
                 }
-                $this->logger->debug(
-                    sprintf(
-                        '[Karla] Order Event ids %s detected (source %s). Processing order placement...',
-                        json_encode($orderIds),
-                        json_encode($source->jsonSerialize())
-                    )
-                );
 
                 $orders = $this->orderRepository->search($criteria, $context);
 
                 foreach ($orders as $order) {
-                       $this->placeKarlaOrder($order);
+                    $this->logger->debug(
+                        sprintf(
+                            '[Karla] Processing order %s from storefront. Data: ',
+                            $order->getOrderNumber(),
+                            json_encode($order)
+                        )
+                    );
+                    $this->placeKarlaOrder($order);
                 }
             }
         } catch (\Throwable $t) {
@@ -224,6 +225,7 @@ class OrderSubscriber implements EventSubscriberInterface
      */
     private function placeKarlaOrder(OrderEntity $order): void
     {
+        $orderNumber = $order->getOrderNumber();
         $customer = $order->getOrderCustomer();
         $customerEmail = $customer ? $customer->getEmail() : null;
 
@@ -233,7 +235,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $lineItemDetails = $this->readLineItems($order->getLineItems());
 
         $orderPlacementPayload = [
-           'order_number' => $order->getOrderNumber(),
+           'order_number' => $orderNumber,
            'order_placed_at' => $order->getCreatedAt()->format(DateTimeInterface::ATOM),
            'products' => $lineItemDetails['products'],
            'total_order_price' => $order->getPrice()->getTotalPrice(),
@@ -249,6 +251,9 @@ class OrderSubscriber implements EventSubscriberInterface
 
         $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
         $this->sendRequestToKarlaApi($url, 'POST', $orderPlacementPayload);
+        $this->logger->info(
+            sprintf('[Karla] Sent order placement to Karla for order number %s.', $orderNumber)
+        );
     }
 
     /**
@@ -258,8 +263,9 @@ class OrderSubscriber implements EventSubscriberInterface
      */
     private function fulfillKarlaOrder(OrderEntity $order, OrderDeliveryCollection $deliveries): void
     {
+        $orderNumber = $order->getOrderNumber();
         $orderFulfillmentPayload = [
-         'id' => $order->getOrderNumber(),
+         'id' => $orderNumber,
          'id_type' => 'order_number',
          'trackings' => [],
         ];
@@ -269,10 +275,13 @@ class OrderSubscriber implements EventSubscriberInterface
             $trackingNumber = $trackingCodes ? $trackingCodes[0] : null;
             if ($trackingNumber) {
                 // Add the tracking information to the payload
+                $shippingMethod = $delivery->getShippingMethod();
+                $carrierReference = $shippingMethod instanceof ShippingMethodEntity ? $shippingMethod->getName() : null;
+
                 $orderFulfillmentPayload['trackings'][] = [
                     'tracking_number' => $trackingNumber,
                     'tracking_placed_at' => (new \DateTime())->format(\DateTime::ATOM),
-                    'carrier_reference' => $delivery->getShippingMethod(),
+                    'carrier_reference' => $carrierReference,
                     'products' => $this->readDeliveryPositions($delivery->getPositions())
                 ];
             }
@@ -291,6 +300,9 @@ class OrderSubscriber implements EventSubscriberInterface
 
         $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
         $this->sendRequestToKarlaApi($url, 'PUT', $orderFulfillmentPayload);
+        $this->logger->info(
+            sprintf('[Karla] Sent order fulfillment to Karla for order number %s.', $orderNumber)
+        );
     }
 
     /**
@@ -352,7 +364,7 @@ class OrderSubscriber implements EventSubscriberInterface
             if (in_array($lineItem->getType(), ['product', $this->depositLineItemType])) {
                 $subTotalPrice += $lineItem->getTotalPrice();
                 $product = $lineItem->getProduct();
-                $cover = $product instanceof ProductEntity ? $lineItem->getProduct()->getCover() : null;
+                $cover = $product instanceof ProductEntity ? $product->getCover() : null;
                 $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
                 $products[] = [
                  'title' => $lineItem->getLabel(),
@@ -392,9 +404,9 @@ class OrderSubscriber implements EventSubscriberInterface
 
         foreach ($deliveryPositions as $deliveryPosition) {
             $lineItem = $deliveryPosition->getOrderLineItem();
-            if (in_array($lineItem->getType(), ['product', $this->depositLineItemType])) {
+            if ($lineItem->getType() === 'product') {
                 $product = $lineItem->getProduct();
-                $cover = $product instanceof ProductEntity ? $lineItem->getProduct()->getCover() : null;
+                $cover = $product instanceof ProductEntity ? $product->getCover() : null;
                 $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
                 $products[] = [
                  'title' => $lineItem->getLabel(),
