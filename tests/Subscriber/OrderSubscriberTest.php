@@ -49,6 +49,7 @@ class OrderSubscriberTest extends TestCase
         // Configure systemConfigServiceMock to return expected values for configurations
         $this->systemConfigServiceMock->method('get')->willReturnMap([
             ['KarlaDelivery.config.shopSlug', null, 'testSlug'],
+            ['KarlaDelivery.config.apiUsername', null, 'testUser'],
             ['KarlaDelivery.config.apiKey', null, 'testKey'],
             ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
             ['KarlaDelivery.config.sendOrderPlacements', null, true],

@@ -29,53 +29,58 @@ use Shopware\Core\System\Country\CountryEntity;
  */
 class OrderSubscriber implements EventSubscriberInterface
 {
-    /**
-     * @var LoggerInterface
-     */
+ /**
+  * @var LoggerInterface
+  */
     private LoggerInterface $logger;
 
-    /**
-     * @var EntityRepository
-     */
+ /**
+  * @var EntityRepository
+  */
     private EntityRepository $orderRepository;
 
-    /**
-     * @var HttpClientInterface
-     */
+ /**
+  * @var HttpClientInterface
+  */
     private HttpClientInterface $httpClient;
 
-    /**
-     * @var string
-     */
+ /**
+  * @var string
+  */
     private string $shopSlug;
 
-    /**
-     * @var string
-     */
+ /**
+  * @var string
+  */
+    private string $apiUsername;
+
+ /**
+  * @var string
+  */
     private string $apiKey;
 
-    /**
-     * @var string
-     */
+ /**
+  * @var string
+  */
     private string $apiUrl;
 
-    /**
-     * @var bool
-     */
+ /**
+  * @var bool
+  */
     private bool $sendOrderPlacements;
 
-    /**
-     * @var string
-     */
+ /**
+  * @var string
+  */
     private string $depositLineItemType;
 
-    /**
-     * OrderSubscriber constructor.
-     * @param SystemConfigService $systemConfigService
-     * @param LoggerInterface $logger
-     * @param EntityRepository $orderRepository
-     * @param HttpClientInterface $httpClient
-     */
+ /**
+  * OrderSubscriber constructor.
+  * @param SystemConfigService $systemConfigService
+  * @param LoggerInterface $logger
+  * @param EntityRepository $orderRepository
+  * @param HttpClientInterface $httpClient
+  */
     public function __construct(
         SystemConfigService $systemConfigService,
         LoggerInterface $logger,
@@ -86,77 +91,90 @@ class OrderSubscriber implements EventSubscriberInterface
         $this->orderRepository = $orderRepository;
         $this->httpClient = $httpClient;
 
-        // Plugin Configuration
-        $this->shopSlug = $systemConfigService->get('KarlaDelivery.config.shopSlug');
-        $this->apiKey = $systemConfigService->get('KarlaDelivery.config.apiKey');
-        $this->apiUrl = $systemConfigService->get('KarlaDelivery.config.apiUrl');
-        $this->sendOrderPlacements = $systemConfigService->get('KarlaDelivery.config.sendOrderPlacements');
-        $this->depositLineItemType = $systemConfigService->get('KarlaDelivery.config.depositLineItemType');
+     // Plugin Configuration
+        $this->shopSlug = $systemConfigService->get('KarlaDelivery.config.shopSlug') ?? '';
+        $this->apiUsername = $systemConfigService->get('KarlaDelivery.config.apiUsername') ?? '';
+        $this->apiKey = $systemConfigService->get('KarlaDelivery.config.apiKey') ?? '';
+        $this->apiUrl = $systemConfigService->get('KarlaDelivery.config.apiUrl') ?? '';
+        $this->sendOrderPlacements = $systemConfigService->get(
+            'KarlaDelivery.config.sendOrderPlacements'
+        );
+        $this->depositLineItemType = $systemConfigService->get(
+            'KarlaDelivery.config.depositLineItemType'
+        );
+
+     // Log warnings if configuration values are missing
+        if (empty($this->shopSlug) || empty($this->apiKey) || empty($this->apiUrl)) {
+            $this->logger->warning(
+                '[Karla] Missing critical configuration values: check shopSlug, apiUsername, apiKey, and/or apiUrl.'
+            );
+        }
     }
 
-    /**
-     * @return array
-     */
+ /**
+  * @return array
+  */
     public static function getSubscribedEvents(): array
     {
         return [
-            OrderEvents::ORDER_WRITTEN_EVENT => 'onOrderWritten',
+        OrderEvents::ORDER_WRITTEN_EVENT => 'onOrderWritten',
         ];
     }
 
-    /**
-     * @param EntityWrittenEvent $event
-     */
+ /**
+  * @param EntityWrittenEvent $event
+  */
     public function onOrderWritten(EntityWrittenEvent $event): void
     {
         try {
-            if ($this->sendOrderPlacements) {
-                $context = $event->getContext();
-                $source = $context->getSource();
-                $orderIds = $event->getIds();
+            if (!$this->sendOrderPlacements) {
+                $this->logger->info('[Karla] Order placement is disabled.');
+                return;
+            }
 
-                if ($source instanceof AdminApiSource) {
-                    $this->logger->info(
-                        sprintf(
-                            '[Karla] Order Event ids %s detected when triggered from the admin interface. Skipping...',
-                            json_encode($orderIds),
-                            $source
-                        )
-                    );
-                    return;
-                }
+            if (empty($this->shopSlug) || empty($this->apiUsername) || empty($this->apiKey) || empty($this->apiUrl)) {
+                $this->logger->warning('[Karla] Critical configurations missing. Skipping order placement.');
+                return;
+            }
 
+            $context = $event->getContext();
+            $source = $context->getSource();
+            $orderIds = $event->getIds();
+
+            if ($source instanceof AdminApiSource) {
                 $this->logger->info(
                     sprintf(
-                        '[Karla] Order Event ids %s detected (source %s). Processing...',
+                        '[Karla] Order Event ids %s detected when triggered from the admin interface. Skipping...',
                         json_encode($orderIds),
-                        json_encode($source->jsonSerialize())
+                        $source
                     )
                 );
+                return;
+            }
 
-                $criteria = new Criteria($orderIds);
-                $criteria->addAssociations(
-                    ['stateMachineState', 'orderCustomer', 'currency']
-                );
-                $criteria->addAssociations(
-                    ['addresses.country', 'addresses.countryState']
-                );
-                $criteria->addAssociations(
-                    ['lineItems.product', 'lineItems.product.cover', 'lineItems.product.cover.media']
-                );
+            $this->logger->info(
+                sprintf(
+                    '[Karla] Order Event ids %s detected (source %s). Processing...',
+                    json_encode($orderIds),
+                    json_encode($source->jsonSerialize())
+                )
+            );
 
-                $orders = $this->orderRepository->search($criteria, $context);
+            $criteria = new Criteria($orderIds);
+            $criteria->addAssociations(
+                ['stateMachineState', 'orderCustomer', 'currency']
+            );
+            $criteria->addAssociations(
+                ['addresses.country', 'addresses.countryState']
+            );
+            $criteria->addAssociations(
+                ['lineItems.product', 'lineItems.product.cover', 'lineItems.product.cover.media']
+            );
 
-                foreach ($orders as $order) {
-                    $this->placeKarlaOrder($order);
-                }
-            } else {
-                $this->logger->info(
-                    sprintf(
-                        '[Karla] Order Event detected: %s (Order placement disabled)',
-                        json_encode($event->getIds())
-                    )
-                );
+            $orders = $this->orderRepository->search($criteria, $context);
+
+            foreach ($orders as $order) {
+                   $this->placeKarlaOrder($order);
             }
         } catch (\Throwable $t) {
             $this->logger->error(
@@ -176,25 +194,25 @@ class OrderSubscriber implements EventSubscriberInterface
         );
     }
 
-    /**
-     * @param OrderEntity $order
-     */
+ /**
+  * @param OrderEntity $order
+  */
     private function placeKarlaOrder(OrderEntity $order): void
     {
         $orderData = $this->readOrder($order);
         $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
 
-        $auth = base64_encode($this->shopSlug . ':' . $this->apiKey);
+        $auth = base64_encode($this->apiUsername . ':' . $this->apiKey);
         $headers = [
-            'Authorization' => 'Basic ' . $auth,
-            'Content-Type' => 'application/json',
+        'Authorization' => 'Basic ' . $auth,
+        'Content-Type' => 'application/json',
         ];
 
         $jsonPayload = json_encode($orderData);
         try {
             $response = $this->httpClient->request('POST', $url, [
-                'headers' => $headers,
-                'body' => $jsonPayload,
+            'headers' => $headers,
+            'body' => $jsonPayload,
             ]);
 
             $content = $response->getContent();
@@ -214,10 +232,10 @@ class OrderSubscriber implements EventSubscriberInterface
     }
 
 
-    /**
-     * @param OrderEntity $order
-     * @return array
-     */
+ /**
+  * @param OrderEntity $order
+  * @return array
+  */
     private function readOrder(OrderEntity $order)
     {
         $customer = $order->getOrderCustomer();
@@ -229,28 +247,28 @@ class OrderSubscriber implements EventSubscriberInterface
         $lineItemDetails = $this->readLineItems($order->getLineItems());
 
         $orderData = [
-            'order_number' => $order->getOrderNumber(),
-            'order_placed_at' => $order->getCreatedAt()->format(DateTimeInterface::ATOM),
-            'products' => $lineItemDetails['products'],
-            'total_order_price' => $order->getPrice()->getTotalPrice(),
-            'shipping_price' => $order->getShippingTotal(),
-            'sub_total_price' => $lineItemDetails['subTotalPrice'],
-            'discount_price' => $lineItemDetails['discountPrice'],
-            'discounts' => $lineItemDetails['discounts'],
-            'email_id' => $customerEmail,
-            'address' => ($address = $order->getAddresses()->first()) ? $this->readAddress($address) : null,
-            'currency' => $currencyCode,
-            'external_id' => $order->getId(),
+        'order_number' => $order->getOrderNumber(),
+        'order_placed_at' => $order->getCreatedAt()->format(DateTimeInterface::ATOM),
+        'products' => $lineItemDetails['products'],
+        'total_order_price' => $order->getPrice()->getTotalPrice(),
+        'shipping_price' => $order->getShippingTotal(),
+        'sub_total_price' => $lineItemDetails['subTotalPrice'],
+        'discount_price' => $lineItemDetails['discountPrice'],
+        'discounts' => $lineItemDetails['discounts'],
+        'email_id' => $customerEmail,
+        'address' => ($address = $order->getAddresses()->first()) ? $this->readAddress($address) : null,
+        'currency' => $currencyCode,
+        'external_id' => $order->getId(),
         ];
 
         $this->logger->info(sprintf('[Karla] Detected order: %s', json_encode($orderData)));
         return $orderData;
     }
 
-    /**
-     * @param OrderLineItemCollection $lineItems
-     * @return array
-     */
+ /**
+  * @param OrderLineItemCollection $lineItems
+  * @return array
+  */
     private function readLineItems(OrderLineItemCollection $lineItems)
     {
         $products = [];
@@ -266,56 +284,56 @@ class OrderSubscriber implements EventSubscriberInterface
                 $cover = $product instanceof ProductEntity ? $lineItem->getProduct()->getCover() : null;
                 $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
                 $products[] = [
-                    'title' => $lineItem->getLabel(),
-                    'quantity' => $lineItem->getQuantity(),
-                    'price' => $lineItem->getUnitPrice(),
-                    'images' => $cover instanceof ProductMediaEntity ? [[
-                        'src' => $media instanceof MediaEntity ? $media->getUrl() : null,
-                        'alt' => $media instanceof MediaEntity ? $media->getAlt() : null
-                    ]] : [],
+                 'title' => $lineItem->getLabel(),
+                 'quantity' => $lineItem->getQuantity(),
+                 'price' => $lineItem->getUnitPrice(),
+                 'images' => $cover instanceof ProductMediaEntity ? [[
+                  'src' => $media instanceof MediaEntity ? $media->getUrl() : null,
+                  'alt' => $media instanceof MediaEntity ? $media->getAlt() : null
+                 ]] : [],
                 ];
             } elseif ($lineItem->getType() === 'promotion') {
                 $discountPrice += abs($lineItem->getTotalPrice());
                 $discounts[] = [
-                    'code' => is_array($payload) ? $payload['code'] : "",
-                    'amount' => $lineItem->getTotalPrice(),
-                    'type' => is_array($payload) ? $payload['discountType'] : null,
+                'code' => is_array($payload) ? $payload['code'] : "",
+                'amount' => $lineItem->getTotalPrice(),
+                'type' => is_array($payload) ? $payload['discountType'] : null,
                 ];
             }
         }
 
         return [
-            'products' => $products,
-            'discounts' => $discounts,
-            'subTotalPrice' => $subTotalPrice,
-            'discountPrice' => $discountPrice,
+        'products' => $products,
+        'discounts' => $discounts,
+        'subTotalPrice' => $subTotalPrice,
+        'discountPrice' => $discountPrice,
         ];
     }
 
-    /**
-     * @param OrderAddressEntity $address
-     * @return array
-     */
+ /**
+  * @param OrderAddressEntity $address
+  * @return array
+  */
     private function readAddress(OrderAddressEntity $address): array
     {
         $country = $address->getCountry();
         $state = $address->getCountryState();
 
         $addressData = [
-            'address_line_1' => $address->getStreet(),
-            'address_line_2' => $address->getAdditionalAddressLine1(),
-            'city' => $address->getCity(),
-            'country' => $country instanceof CountryEntity ? $country->getName() : null,
-            'country_code' => $country instanceof CountryEntity ? $country->getIso() : null,
-            'name' => $address->getFirstName() . ' ' . $address->getLastName(),
-            'phone' => $address->getPhoneNumber(),
-            'province' => $state instanceof CountryStateEntity ? $state->getName() : null,
-            'province_code' => $state instanceof CountryStateEntity ? $state->getShortCode() : null,
-            'street' => trim(
-                $address->getStreet() . ', ' . $address->getAdditionalAddressLine1(),
-                ', '
-            ),
-            'zip_code' => $address->getZipcode(),
+        'address_line_1' => $address->getStreet(),
+        'address_line_2' => $address->getAdditionalAddressLine1(),
+        'city' => $address->getCity(),
+        'country' => $country instanceof CountryEntity ? $country->getName() : null,
+        'country_code' => $country instanceof CountryEntity ? $country->getIso() : null,
+        'name' => $address->getFirstName() . ' ' . $address->getLastName(),
+        'phone' => $address->getPhoneNumber(),
+        'province' => $state instanceof CountryStateEntity ? $state->getName() : null,
+        'province_code' => $state instanceof CountryStateEntity ? $state->getShortCode() : null,
+        'street' => trim(
+            $address->getStreet() . ', ' . $address->getAdditionalAddressLine1(),
+            ', '
+        ),
+        'zip_code' => $address->getZipcode(),
         ];
 
         return $addressData;

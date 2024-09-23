@@ -11,6 +11,13 @@
             <helpText>Unique identifier for your Karla shop.</helpText>
             <helpText lang="de-DE">Eindeutiger Bezeichner für dein Karla-Shop.</helpText>
         </input-field>
+        <input-field>
+            <name>apiUsername</name>
+            <label>Your Organization Username</label>
+            <label lang="de-DE">Dein Karla-Shop-Benutzername</label>
+            <helpText>Username to access the Karla API.</helpText>
+            <helpText lang="de-DE">Benutzername zum Zugriff auf die Karla API.</helpText>
+        </input-field>
         <input-field type="password">
             <name>apiKey</name>
             <label>Your Karla API key</label>

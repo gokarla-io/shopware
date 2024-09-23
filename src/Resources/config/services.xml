@@ -5,10 +5,7 @@
            xsi:schemaLocation="http://symfony.com/schema/dic/services http://symfony.com/schema/dic/services/services-1.0.xsd">
 
     <services>
-        <service id="Karla\Delivery\Logger" class="Monolog\Logger">
-            <factory service="Shopware\Core\Framework\Log\LoggerFactory" method="createRotating"/>
-            <argument type="string">karla_delivery</argument>
-        </service>
+        <service id="Karla\Delivery\Logger" alias="monolog.logger"/>
         <service id="Karla\Delivery\Subscriber\OrderSubscriber">
             <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService" />
             <argument type="service" id="Karla\Delivery\Logger"/>

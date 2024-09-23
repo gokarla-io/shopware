@@ -16,9 +16,9 @@ To see the list of prerequisites to run this project locally:
 make init
 ```
 
-# Installation
+## Installation
 
-## Composer
+### Composer
 
 Via composer
 
@@ -26,19 +26,18 @@ Via composer
 composer require gokarla/shopware
 ```
 
-## Zip file via console
+### Zip file via console
 
 Extract the .zip file to `<installation-root>/custom/plugins`.
 
 Run the following commands in your `<installation-root>`
 
-````
 ```sh
 bin/console plugin:install --activate KarlaDelivery
 bin/console cache:clear
-````
+```
 
-## Zip file via UI dashboard
+### Zip file via UI dashboard
 
 Download a .zip release and upload it in through your admin panel.
 See [Shopware Integration](https://docs.gokarla.io/docs/shop-integrations/shopware) for more information.
@@ -71,18 +70,20 @@ make dockware-attach
 ### Access shop
 
 - Navigate to <http://localhost/admin> and type user `admin` and password `shopware`
-  to access the admin panel
+  to access the admin panel.
+  - Go to `Extensions`, `My extensions` and make sure that the `Karla Delivery` extension is active.
+  - Go to the extension settings and provide a shop slug and api key.
 - Navigate to <http://localhost> to see the shop and create test orders
 - Navigate to <http://localhost/logs> to browse the logs
 
-## Manual Testing
+### Manual Testing
 
-### Create an order
+#### Create an order
 
 Go to the shop at <http://localhost> and order something. This should trigger the webhook
 and the backend should receive its payload in the shopware hook endpoint.
 
-### Ship an order
+#### Ship an order
 
 Go to the admin panel at <http://localhost/admin>, select an order, go to `Details`
 and update the delivery status to `Shipped`. This will trigger a webhook as defined
