@@ -8,7 +8,6 @@ use DateTimeInterface;
 use Shopware\Core\Content\Media\MediaEntity;
 use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
 use Shopware\Core\Content\Product\ProductEntity;
-use Shopware\Core\Framework\Api\Context\AdminApiSource;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
@@ -22,7 +21,6 @@ use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryCollection
 use Shopware\Core\Checkout\Order\Aggregate\OrderDeliveryPosition\OrderDeliveryPositionCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemCollection;
 use Shopware\Core\Checkout\Order\OrderEntity;
-use Shopware\Core\Checkout\Shipping\ShippingMethodEntity;
 use Shopware\Core\System\Country\Aggregate\CountryState\CountryStateEntity;
 use Shopware\Core\System\Country\CountryEntity;
 
@@ -70,12 +68,7 @@ class OrderSubscriber implements EventSubscriberInterface
     /**
      * @var bool
      */
-    private bool $sendOrderPlacements;
-
-    /**
-     * @var bool
-     */
-    private bool $sendOrderFulfillments;
+    private bool $sendOrders;
 
     /**
      * @var string
@@ -104,11 +97,8 @@ class OrderSubscriber implements EventSubscriberInterface
         $this->apiUsername = $systemConfigService->get('KarlaDelivery.config.apiUsername') ?? '';
         $this->apiKey = $systemConfigService->get('KarlaDelivery.config.apiKey') ?? '';
         $this->apiUrl = $systemConfigService->get('KarlaDelivery.config.apiUrl') ?? '';
-        $this->sendOrderPlacements = $systemConfigService->get(
-            'KarlaDelivery.config.sendOrderPlacements'
-        ) ?? false;
-        $this->sendOrderFulfillments = $systemConfigService->get(
-            'KarlaDelivery.config.sendOrderFulfillments'
+        $this->sendOrders = $systemConfigService->get(
+            'KarlaDelivery.config.sendOrders'
         ) ?? false;
         $this->depositLineItemType = $systemConfigService->get(
             'KarlaDelivery.config.depositLineItemType'
@@ -146,66 +136,29 @@ class OrderSubscriber implements EventSubscriberInterface
             }
 
             $context = $event->getContext();
-            $source = $context->getSource();
             $orderIds = $event->getIds();
 
             $criteria = new Criteria($orderIds);
-            $criteria->addAssociations(
-                ['stateMachineState', 'orderCustomer', 'currency']
-            );
-            $criteria->addAssociations(
-                ['addresses.country', 'addresses.countryState']
-            );
-            $criteria->addAssociations(
-                ['lineItems.product', 'lineItems.product.cover', 'lineItems.product.cover.media']
-            );
+            $criteria->addAssociations([
+                'addresses.country',
+                'addresses.countryState',
+                'currency',
+                'deliveries.positions.orderLineItem.product',
+                'deliveries.positions',
+                'deliveries.stateMachineState',
+                'deliveries.trackingCodes',
+                'lineItems.product.cover.media',
+                'lineItems.product.cover',
+                'lineItems.product',
+                'orderCustomer',
+                'stateMachineState',
+                'transactions.stateMachineState',
+            ]);
 
-            if ($source instanceof AdminApiSource) {
-                if (!$this->sendOrderFulfillments) {
-                    $this->logger->info('[Karla] Order fulfillment is disabled.');
-                }
-                // Event triggered from the admin panel
-                $criteria->addAssociations([
-                   'deliveries.stateMachineState',
-                   'deliveries.trackingCodes',
-                   'deliveries.positions',
-                   'deliveries.positions.orderLineItem.product',
-                ]);
-
-                $orders = $this->orderRepository->search($criteria, $context);
-
-                foreach ($orders as $order) {
-                    $deliveries = $order->getDeliveries();
-                    $this->logger->debug(
-                        sprintf(
-                            '[Karla] Processing order %s from admin panel. Deliveries: %s',
-                            $order->getOrderNumber(),
-                            json_encode($deliveries)
-                        ),
-                    );
-                    if (!empty($deliveries)) {
-                        $this->fulfillKarlaOrder($order, $deliveries);
-                    }
-                }
-            } else {
-                // Event triggered from the storefront
-                if (!$this->sendOrderPlacements) {
-                    $this->logger->info('[Karla] Order placement is disabled.');
-                    return;
-                }
-
-                $orders = $this->orderRepository->search($criteria, $context);
-
-                foreach ($orders as $order) {
-                    $this->logger->debug(
-                        sprintf(
-                            '[Karla] Processing order %s from storefront. Data: ',
-                            $order->getOrderNumber(),
-                            json_encode($order)
-                        )
-                    );
-                    $this->placeKarlaOrder($order);
-                }
+            $orders = $this->orderRepository->search($criteria, $context);
+            foreach ($orders as $order) {
+                $deliveries = $order->getDeliveries();
+                $this->sendKarlaOrder($order, $deliveries);
             }
         } catch (\Throwable $t) {
             $this->logger->error(
@@ -220,12 +173,26 @@ class OrderSubscriber implements EventSubscriberInterface
     }
 
     /**
-     * Place an order through Karla's API
+     * Upsert and optionally fulfill an order through Karla's API
      * @param OrderEntity $order
+     * @param OrderDeliveryCollection $deliveries Array of OrderDeliveryEntity objects
      */
-    private function placeKarlaOrder(OrderEntity $order): void
+    private function sendKarlaOrder(OrderEntity $order, OrderDeliveryCollection $deliveries): void
     {
         $orderNumber = $order->getOrderNumber();
+        $orderStatus = $order->getStateMachineState()->getName();
+
+        if (!in_array($orderStatus, ['Open', 'In Progress', 'Done'])) {
+            $this->logger->debug(
+                sprintf(
+                    '[Karla] Order %s skipped: status is %s.',
+                    $orderNumber,
+                    $orderStatus
+                )
+            );
+            return;
+        }
+
         $customer = $order->getOrderCustomer();
         $customerEmail = $customer ? $customer->getEmail() : null;
 
@@ -234,74 +201,77 @@ class OrderSubscriber implements EventSubscriberInterface
 
         $lineItemDetails = $this->readLineItems($order->getLineItems());
 
-        $orderPlacementPayload = [
-           'order_number' => $orderNumber,
-           'order_placed_at' => $order->getCreatedAt()->format(DateTimeInterface::ATOM),
-           'products' => $lineItemDetails['products'],
-           'total_order_price' => $order->getPrice()->getTotalPrice(),
-           'shipping_price' => $order->getShippingTotal(),
-           'sub_total_price' => $lineItemDetails['subTotalPrice'],
-           'discount_price' => $lineItemDetails['discountPrice'],
-           'discounts' => $lineItemDetails['discounts'],
-           'email_id' => $customerEmail,
-           'address' => ($address = $order->getAddresses()->first()) ? $this->readAddress($address) : null,
-           'currency' => $currencyCode,
-           'external_id' => $order->getId(),
-        ];
-
-        $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
-        $this->sendRequestToKarlaApi($url, 'POST', $orderPlacementPayload);
-        $this->logger->info(
-            sprintf('[Karla] Sent order placement to Karla for order number %s.', $orderNumber)
-        );
-    }
-
-    /**
-     * Fulfill an order through Karla's API
-     * @param OrderEntity $order
-     * @param OrderDeliveryCollection $deliveries Array of OrderDeliveryEntity objects
-     */
-    private function fulfillKarlaOrder(OrderEntity $order, OrderDeliveryCollection $deliveries): void
-    {
-        $orderNumber = $order->getOrderNumber();
-        $orderFulfillmentPayload = [
+        $orderUpsertPayload = [
          'id' => $orderNumber,
          'id_type' => 'order_number',
+         'order' => [
+                'order_number' => $orderNumber,
+                'order_placed_at' => $order->getCreatedAt()->format(DateTimeInterface::ATOM),
+                'products' => $lineItemDetails['products'],
+                'total_order_price' => $order->getPrice()->getTotalPrice(),
+                'shipping_price' => $order->getShippingTotal(),
+                'sub_total_price' => $lineItemDetails['subTotalPrice'],
+                'discount_price' => $lineItemDetails['discountPrice'],
+                'discounts' => $lineItemDetails['discounts'],
+                'email_id' => $customerEmail,
+                'address' => ($address = $order->getAddresses()->first()) ? $this->readAddress($address) : null,
+                'currency' => $currencyCode,
+                'external_id' => $order->getId(),
+            ],
          'trackings' => [],
         ];
         foreach ($deliveries as $delivery) {
+            $deliveryState = $delivery->getStateMachineState()->getName();
+            if (!str_starts_with($deliveryState, 'Shipped')) {
+                $this->logger->debug(
+                    sprintf(
+                        '[Karla] Order %s delivery skipped: status is %s.',
+                        $orderNumber,
+                        $deliveryState
+                    )
+                );
+                continue;
+            }
             $trackingCodes = $delivery->getTrackingCodes();
             // Supports only one tracking code per delivery
             $trackingNumber = $trackingCodes ? $trackingCodes[0] : null;
             if ($trackingNumber) {
-                // Add the tracking information to the payload
-                $shippingMethod = $delivery->getShippingMethod();
-                $carrierReference = $shippingMethod instanceof ShippingMethodEntity ? $shippingMethod->getName() : null;
-
-                $orderFulfillmentPayload['trackings'][] = [
+                $this->logger->debug(
+                    sprintf(
+                        '[Karla] Detected tracking number %s for order %s.',
+                        $trackingNumber,
+                        $orderNumber,
+                    )
+                );
+                $orderUpsertPayload['trackings'][] = [
                     'tracking_number' => $trackingNumber,
                     'tracking_placed_at' => (new \DateTime())->format(\DateTime::ATOM),
-                    'carrier_reference' => $carrierReference,
                     'products' => $this->readDeliveryPositions($delivery->getPositions())
                 ];
+            } else {
+                $this->logger->warning(
+                    sprintf(
+                        '[Karla] Order %s delivery has no tracking codes.',
+                        $orderNumber,
+                    )
+                );
             }
         }
 
-        if (empty($orderFulfillmentPayload['trackings'])) {
-            $this->logger->warning(
+        if (!$this->sendOrders) {
+            $this->logger->info(
                 sprintf(
-                    '[Karla] No tracking information found for order %s. Skipping order fulfillment. Payload: %s',
-                    $order->getOrderNumber(),
-                    json_encode($orderFulfillmentPayload),
+                    '[Karla] Sending orders to Karla is disabled. Order payload: %s.',
+                    json_encode($orderUpsertPayload)
                 )
             );
             return;
         }
 
         $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
-        $this->sendRequestToKarlaApi($url, 'PUT', $orderFulfillmentPayload);
+        $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload);
         $this->logger->info(
-            sprintf('[Karla] Sent order fulfillment to Karla for order number %s.', $orderNumber)
+            sprintf('[Karla] Sent order %s to Karla.', $orderNumber)
         );
     }
 
@@ -316,35 +286,27 @@ class OrderSubscriber implements EventSubscriberInterface
      */
     private function sendRequestToKarlaApi(string $url, string $method, array $orderData): void
     {
+        $jsonPayload = json_encode($orderData);
         $auth = base64_encode($this->apiUsername . ':' . $this->apiKey);
         $headers = [
             'Authorization' => 'Basic ' . $auth,
             'Content-Type' => 'application/json',
         ];
 
-        $jsonPayload = json_encode($orderData);
-
-        try {
-            $response = $this->httpClient->request($method, $url, [
-                'headers' => $headers,
-                'body' => $jsonPayload,
-            ]);
-
-            $content = $response->getContent();
-            $this->logger->debug(
-                sprintf('[Karla] API request (%s) sent successfully. Response: %s', $method, $content)
-            );
-        } catch (\Exception $e) {
-            $this->logger->error(
-                sprintf(
-                    '[Karla] Failed to send API request (%s). Status Code: %s. Response: %s. Error: %s.',
-                    $method,
-                    $e->getMessage(),
-                    $response->getStatusCode(),
-                    $response->getContent()
-                )
-            );
-        }
+        $response = $this->httpClient->request($method, $url, [
+            'headers' => $headers,
+            'body' => $jsonPayload,
+        ]);
+        $content = $response->getContent();
+        $statusCode = $response->getStatusCode();
+         $this->logger->debug(
+             sprintf(
+                 '[Karla] API request (%s) sent successfully. Status Code: %s. Response: %s',
+                 $method,
+                 $statusCode,
+                 $content
+             )
+         );
     }
 
     /**

@@ -38,19 +38,11 @@
         <title>Shop events</title>
         <title lang="de-DE">Shop-Ereignisse</title>
         <input-field type="bool">
-            <name>sendOrderPlacements</name>
-            <label>Send Order Placements</label>
-            <label lang="de-DE">Bestellungsereignisse senden</label>
-            <helpText>Toggle sending order placement events.</helpText>
+            <name>sendOrders</name>
+            <label>Orders</label>
+            <label lang="de-DE">Bestellungsereignisse</label>
+            <helpText>Toggle sending order events.</helpText>
             <helpText lang="de-DE">Umschalten, ob Bestellungsereignisse gesendet werden sollen.</helpText>
-            <defaultValue>true</defaultValue>
-        </input-field>
-        <input-field type="bool">
-            <name>sendOrderFulfillments</name>
-            <label>Send Order Fulfillments</label>
-            <label lang="de-DE">Bestellabwicklungen senden</label>
-            <helpText>Toggle sending order fulfillment events (orders with shipped and partially shipped status).</helpText>
-            <helpText lang="de-DE">Umschalten, ob Bestellabwicklungsereignisse gesendet werden sollen (Bestellungen mit dem Status versandt und teilweise versandt).</helpText>
             <defaultValue>true</defaultValue>
         </input-field>
     </card>

@@ -36,6 +36,7 @@ use Shopware\Core\Checkout\Order\Aggregate\OrderDeliveryPosition\OrderDeliveryPo
 use Shopware\Core\Checkout\Order\OrderCollection;
 use Shopware\Core\Checkout\Shipping\ShippingMethodEntity;
 use Shopware\Core\Framework\Api\Context\AdminApiSource;
+use Shopware\Core\System\StateMachine\Aggregation\StateMachineState\StateMachineStateEntity;
 
 class OrderSubscriberTest extends TestCase
 {
@@ -57,8 +58,7 @@ class OrderSubscriberTest extends TestCase
             ['KarlaDelivery.config.apiUsername', null, 'testUser'],
             ['KarlaDelivery.config.apiKey', null, 'testKey'],
             ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
-            ['KarlaDelivery.config.sendOrderPlacements', null, true],
-            ['KarlaDelivery.config.sendOrderFulfillments', null, true],
+            ['KarlaDelivery.config.sendOrders', null, true],
             ['KarlaDelivery.config.depositLineItemType', null, ""],
         ]);
     }
@@ -121,12 +121,20 @@ class OrderSubscriberTest extends TestCase
         return $context;
     }
 
+    private function createMockStateMachineState(string $stateName)
+    {
+        $stateMachineStateMock = $this->createMock(StateMachineStateEntity::class);
+        $stateMachineStateMock->method('getName')->willReturn($stateName);
+        return $stateMachineStateMock;
+    }
+
     /**
      * Create a mock OrderCollection with a single partial order
      */
     private function createPartialOrderEntityMock(): OrderEntity {
         // Mock order repository
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('Open'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
@@ -163,6 +171,7 @@ class OrderSubscriberTest extends TestCase
         $addressEntity->method('getCity')->willReturn('Example City');
         $addressCollection = new OrderAddressCollection([$addressEntity]);
         $orderEntity->method('getAddresses')->willReturn($addressCollection);
+        $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
         return $orderEntity;
     }
 
@@ -171,6 +180,7 @@ class OrderSubscriberTest extends TestCase
      */
     private function createOrderEntityMock(): OrderEntity {
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('Open'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
@@ -217,6 +227,7 @@ class OrderSubscriberTest extends TestCase
         $addressEntity->method('getCity')->willReturn('Example City');
         $addressCollection = new OrderAddressCollection([$addressEntity]);
         $orderEntity->method('getAddresses')->willReturn($addressCollection);
+        $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
         return $orderEntity;
     }
 
@@ -256,7 +267,7 @@ class OrderSubscriberTest extends TestCase
         $responseMock->method('getContent')->willReturn('{"success":true}');
         $this->httpClientMock->expects(
             $this->once())->method('request')->with(
-                $this->equalTo('POST'),
+                $this->equalTo('PUT'),
                 $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
                 $this->anything()
             )
@@ -288,7 +299,7 @@ class OrderSubscriberTest extends TestCase
         $responseMock->method('getContent')->willReturn('{"success":true}');
         $this->httpClientMock->expects(
             $this->once())->method('request')->with(
-                $this->equalTo('POST'),
+                $this->equalTo('PUT'),
                 $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
                 $this->anything()
             )
