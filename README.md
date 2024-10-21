@@ -4,8 +4,9 @@ Simplify your purchase experience in [Shopware](https://www.shopware.com/en/) wi
 
 ## Features
 
-- Place orders created through the storefront (submitted cart by the user).
-- Fulfill orders if a tracking code is detected when editing in the admin panel.
+- Place orders (without a tracking code).
+- Update shipment address from an order.
+- Fulfill orders (add a delivery to an order with a tracking code).
 
 ## Requirements
 
