@@ -35,15 +35,91 @@
         </input-field>
     </card>
     <card>
-        <title>Shop events</title>
-        <title lang="de-DE">Shop-Ereignisse</title>
+        <title>Order Statuses</title>
+        <title lang="de-DE">Bestellstatus</title>
         <input-field type="bool">
-            <name>sendOrders</name>
-            <label>Orders</label>
-            <label lang="de-DE">Bestellungsereignisse</label>
-            <helpText>Toggle sending order events.</helpText>
-            <helpText lang="de-DE">Umschalten, ob Bestellungsereignisse gesendet werden sollen.</helpText>
+            <name>orderOpen</name>
+            <label>Open</label>
+            <label lang="de-DE">Offen</label>
+            <helpText>Send the order and its deliveries to Karla servers when order status is "Open".</helpText>
+            <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Bestellstatus "Offen" ist.</helpText>
+            <defaultValue>false</defaultValue>
+        </input-field>
+        <input-field type="bool">
+            <name>orderInProgress</name>
+            <label>In Progress</label>
+            <label lang="de-DE">In Bearbeitung</label>
+            <helpText>Send the order and its deliveries to Karla servers when order status is "In Progress".</helpText>
+            <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Bestellstatus "In Bearbeitung" ist.</helpText>
             <defaultValue>true</defaultValue>
+        </input-field>
+        <input-field type="bool">
+            <name>orderCompleted</name>
+            <label>Completed</label>
+            <label lang="de-DE">Abgeschlossen</label>
+            <helpText>Send the order and its deliveries to Karla servers when order status is "Completed".</helpText>
+            <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Bestellstatus "Abgeschlossen" ist.</helpText>
+            <defaultValue>true</defaultValue>
+        </input-field>
+        <input-field type="bool">
+            <name>orderCancelled</name>
+            <label>Cancelled</label>
+            <label lang="de-DE">Storniert</label>
+            <helpText>Send the order and its deliveries to Karla servers when order status is "Cancelled".</helpText>
+            <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Bestellstatus "Storniert" ist.</helpText>
+            <defaultValue>false</defaultValue>
+        </input-field>
+    </card>
+    <card>
+        <title>Delivery Statuses</title>
+        <title lang="de-DE">Lieferstatus</title>
+        <input-field type="bool">
+            <name>deliveryOpen</name>
+            <label>Open</label>
+            <label lang="de-DE">Offen</label>
+            <helpText>Send the order and its deliveries to Karla servers when delivery status is "Open".</helpText>
+            <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Lieferstatus "Offen" ist.</helpText>
+            <defaultValue>false</defaultValue>
+        </input-field>
+        <input-field type="bool">
+            <name>deliveryShipped</name>
+            <label>Shipped</label>
+            <label lang="de-DE">Versandt</label>
+            <helpText>Send the order and its deliveries to Karla servers when delivery status is "Shipped".</helpText>
+            <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Lieferstatus "Versandt" ist.</helpText>
+            <defaultValue>true</defaultValue>
+        </input-field>
+        <input-field type="bool">
+            <name>deliveryShippedPartially</name>
+            <label>Shipped (partially)</label>
+            <label lang="de-DE">Teilweise versandt</label>
+            <helpText>Send the order and its deliveries to Karla servers when delivery status is "Shipped (partially)".</helpText>
+            <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Lieferstatus "Teilweise versandt" ist.</helpText>
+            <defaultValue>true</defaultValue>
+        </input-field>
+        <input-field type="bool">
+            <name>deliveryReturned</name>
+            <label>Returned</label>
+            <label lang="de-DE">Zurückgesendet</label>
+            <helpText>Send the order and its deliveries to Karla servers when delivery status is "Returned".</helpText>
+            <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Lieferstatus "Zurückgesendet" ist.</helpText>
+            <defaultValue>false</defaultValue>
+        </input-field>
+        <input-field type="bool">
+            <name>deliveryReturnedPartially</name>
+            <label>Returned (partially)</label>
+            <label lang="de-DE">Teilweise zurückgesendet</label>
+            <helpText>Send the order and its deliveries to Karla servers when delivery status is "Returned (partially)".</helpText>
+            <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Lieferstatus "Teilweise zurückgesendet" ist.</helpText>
+            <defaultValue>false</defaultValue>
+        </input-field>
+        <input-field type="bool">
+            <name>deliveryCancelled</name>
+            <label>Cancelled</label>
+            <label lang="de-DE">Storniert</label>
+            <helpText>Send the order and its deliveries to Karla servers when delivery status is "Cancelled".</helpText>
+            <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Lieferstatus "Storniert" ist.</helpText>
+            <defaultValue>false</defaultValue>
         </input-field>
     </card>
     <card>

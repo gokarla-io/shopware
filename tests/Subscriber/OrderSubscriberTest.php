@@ -54,11 +54,24 @@ class OrderSubscriberTest extends TestCase
 
         // Configure systemConfigServiceMock to return expected values for configurations
         $this->systemConfigServiceMock->method('get')->willReturnMap([
+            // API config
             ['KarlaDelivery.config.shopSlug', null, 'testSlug'],
             ['KarlaDelivery.config.apiUsername', null, 'testUser'],
             ['KarlaDelivery.config.apiKey', null, 'testKey'],
             ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
-            ['KarlaDelivery.config.sendOrders', null, true],
+            // Order Statuses config
+            ['KarlaDelivery.config.orderOpen', null, false],
+            ['KarlaDelivery.config.orderInProgress', null, true],
+            ['KarlaDelivery.config.orderCompleted', null, false],
+            ['KarlaDelivery.config.orderCancelled', null, false],
+            // Delivery Statuses config
+            ['KarlaDelivery.config.deliveryOpen', null, false],
+            ['KarlaDelivery.config.deliveryShipped', null, true],
+            ['KarlaDelivery.config.deliveryShippedPartially', null, true],
+            ['KarlaDelivery.config.deliveryReturned', null, false],
+            ['KarlaDelivery.config.deliveryReturnedPartially', null, false],
+            ['KarlaDelivery.config.deliveryCancelled', null, false],
+            // Mappings config
             ['KarlaDelivery.config.depositLineItemType', null, ""],
         ]);
     }
@@ -124,7 +137,7 @@ class OrderSubscriberTest extends TestCase
     private function createMockStateMachineState(string $stateName)
     {
         $stateMachineStateMock = $this->createMock(StateMachineStateEntity::class);
-        $stateMachineStateMock->method('getName')->willReturn($stateName);
+        $stateMachineStateMock->method('getTechnicalName')->willReturn($stateName);
         return $stateMachineStateMock;
     }
 
@@ -134,7 +147,7 @@ class OrderSubscriberTest extends TestCase
     private function createPartialOrderEntityMock(): OrderEntity {
         // Mock order repository
         $orderEntity = $this->createMock(OrderEntity::class);
-        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('Open'));
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
@@ -180,7 +193,7 @@ class OrderSubscriberTest extends TestCase
      */
     private function createOrderEntityMock(): OrderEntity {
         $orderEntity = $this->createMock(OrderEntity::class);
-        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('Open'));
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);

@@ -66,9 +66,14 @@ class OrderSubscriber implements EventSubscriberInterface
     private string $apiUrl;
 
     /**
-     * @var bool
+     * @var array
      */
-    private bool $sendOrders;
+    private array $allowedOrderStatuses;
+
+    /**
+     * @var array
+     */
+    private array $allowedDeliveryStatuses;
 
     /**
      * @var string
@@ -92,14 +97,77 @@ class OrderSubscriber implements EventSubscriberInterface
         $this->orderRepository = $orderRepository;
         $this->httpClient = $httpClient;
 
-        // Plugin Configuration
+        // API Configuration
         $this->shopSlug = $systemConfigService->get('KarlaDelivery.config.shopSlug') ?? '';
         $this->apiUsername = $systemConfigService->get('KarlaDelivery.config.apiUsername') ?? '';
         $this->apiKey = $systemConfigService->get('KarlaDelivery.config.apiKey') ?? '';
         $this->apiUrl = $systemConfigService->get('KarlaDelivery.config.apiUrl') ?? '';
-        $this->sendOrders = $systemConfigService->get(
-            'KarlaDelivery.config.sendOrders'
+
+        // Order Statuses Configuration
+        $orderOpen = $systemConfigService->get(
+            'KarlaDelivery.config.orderOpen'
         ) ?? false;
+        $orderInProgress = $systemConfigService->get(
+            'KarlaDelivery.config.orderInProgress'
+        ) ?? false;
+        $orderCompleted = $systemConfigService->get(
+            'KarlaDelivery.config.orderCompleted'
+        ) ?? false;
+        $orderCancelled = $systemConfigService->get(
+            'KarlaDelivery.config.orderCancelled'
+        ) ?? false;
+        if ($orderOpen) {
+            $this->allowedOrderStatuses[] = 'open';
+        }
+        if ($orderInProgress) {
+            $this->allowedOrderStatuses[] = 'in_progress';
+        }
+        if ($orderCompleted) {
+            $this->allowedOrderStatuses[] = 'completed';
+        }
+        if ($orderCancelled) {
+            $this->allowedOrderStatuses[] = 'cancelled';
+        }
+
+        // Delivery Statuses Configuration
+        $deliveryOpen = $systemConfigService->get(
+            'KarlaDelivery.config.deliveryOpen'
+        ) ?? false;
+        $deliveryShipped = $systemConfigService->get(
+            'KarlaDelivery.config.deliveryShipped'
+        ) ?? false;
+        $deliveryShippedPartially = $systemConfigService->get(
+            'KarlaDelivery.config.deliveryShippedPartially'
+        ) ?? false;
+        $deliveryReturned = $systemConfigService->get(
+            'KarlaDelivery.config.deliveryReturned'
+        ) ?? false;
+        $deliveryReturnedPartially = $systemConfigService->get(
+            'KarlaDelivery.config.deliveryReturnedPartially'
+        ) ?? false;
+        $deliveryCancelled = $systemConfigService->get(
+            'KarlaDelivery.config.deliveryCancelled'
+        ) ?? false;
+        if ($deliveryOpen) {
+            $this->allowedDeliveryStatuses[] = 'open';
+        }
+        if ($deliveryShipped) {
+            $this->allowedDeliveryStatuses[] = 'shipped';
+        }
+        if ($deliveryShippedPartially) {
+            $this->allowedDeliveryStatuses[] = 'shipped_partially';
+        }
+        if ($deliveryReturned) {
+            $this->allowedDeliveryStatuses[] = 'returned';
+        }
+        if ($deliveryReturnedPartially) {
+            $this->allowedDeliveryStatuses[] = 'returned_partially';
+        }
+        if ($deliveryCancelled) {
+            $this->allowedDeliveryStatuses[] = 'cancelled';
+        }
+
+        // Mappings Configuration
         $this->depositLineItemType = $systemConfigService->get(
             'KarlaDelivery.config.depositLineItemType'
         );
@@ -180,14 +248,15 @@ class OrderSubscriber implements EventSubscriberInterface
     private function sendKarlaOrder(OrderEntity $order, OrderDeliveryCollection $deliveries): void
     {
         $orderNumber = $order->getOrderNumber();
-        $orderStatus = $order->getStateMachineState()->getName();
+        $orderStatus = $order->getStateMachineState()->getTechnicalName();
 
-        if (!in_array($orderStatus, ['Open', 'In Progress', 'Done'])) {
-            $this->logger->debug(
+        if (!in_array($orderStatus, $this->allowedOrderStatuses, true)) {
+            $this->logger->info(
                 sprintf(
-                    '[Karla] Order %s skipped: status is %s.',
+                    '[Karla] Order "%s" skipped: order status is "%s". Allowed order statuses are: %s',
                     $orderNumber,
-                    $orderStatus
+                    $orderStatus,
+                    json_encode($this->allowedOrderStatuses)
                 )
             );
             return;
@@ -220,14 +289,17 @@ class OrderSubscriber implements EventSubscriberInterface
             ],
          'trackings' => [],
         ];
+        $nDeliveries = 0;
         foreach ($deliveries as $delivery) {
-            $deliveryState = $delivery->getStateMachineState()->getName();
-            if (!str_starts_with($deliveryState, 'Shipped')) {
-                $this->logger->debug(
+            $deliveryStatus = $delivery->getStateMachineState()->getTechnicalName();
+            if (!in_array($deliveryStatus, $this->allowedDeliveryStatuses, true)) {
+                $this->logger->info(
                     sprintf(
-                        '[Karla] Order %s delivery skipped: status is %s.',
+                        '[Karla] Order "%s" delivery skipped: delivery status is "%s". ' .
+                        'Allowed delivery statuses are: %s',
                         $orderNumber,
-                        $deliveryState
+                        $deliveryStatus,
+                        json_encode($this->allowedDeliveryStatuses)
                     )
                 );
                 continue;
@@ -238,7 +310,7 @@ class OrderSubscriber implements EventSubscriberInterface
             if ($trackingNumber) {
                 $this->logger->debug(
                     sprintf(
-                        '[Karla] Detected tracking number %s for order %s.',
+                        '[Karla] Order "%s" delivery found: detected tracking number "%s".',
                         $trackingNumber,
                         $orderNumber,
                     )
@@ -248,30 +320,21 @@ class OrderSubscriber implements EventSubscriberInterface
                     'tracking_placed_at' => (new \DateTime())->format(\DateTime::ATOM),
                     'products' => $this->readDeliveryPositions($delivery->getPositions())
                 ];
+                $nDeliveries++;
             } else {
-                $this->logger->warning(
+                $this->logger->info(
                     sprintf(
-                        '[Karla] Order %s delivery has no tracking codes.',
+                        '[Karla] Order "%s" delivery skipped: delivery has no tracking codes.',
                         $orderNumber,
                     )
                 );
             }
         }
 
-        if (!$this->sendOrders) {
-            $this->logger->info(
-                sprintf(
-                    '[Karla] Sending orders to Karla is disabled. Order payload: %s.',
-                    json_encode($orderUpsertPayload)
-                )
-            );
-            return;
-        }
-
         $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
         $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload);
         $this->logger->info(
-            sprintf('[Karla] Sent order %s to Karla.', $orderNumber)
+            sprintf('[Karla] Sent order "%s" data and %d deliveries to Karla.', $orderNumber, $nDeliveries)
         );
     }
 
@@ -301,10 +364,11 @@ class OrderSubscriber implements EventSubscriberInterface
         $statusCode = $response->getStatusCode();
          $this->logger->debug(
              sprintf(
-                 '[Karla] API request (%s) sent successfully. Status Code: %s. Response: %s',
+                 '[Karla] %s API request sent successfully. Status Code: %s. Response: %s. Payload: %s.',
                  $method,
                  $statusCode,
-                 $content
+                 $content,
+                 json_encode($orderData),
              )
          );
     }
