@@ -27,14 +27,9 @@ jobs:
       - name: Create Release
         if: github.ref == 'refs/heads/main'
         id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: darioblanco/release-wizard@v2
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: true
-          prerelease: false
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload release asset
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-release-asset@v1
