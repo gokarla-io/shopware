@@ -362,6 +362,14 @@ class OrderSubscriber implements EventSubscriberInterface
             'Content-Type' => 'application/json',
         ];
 
+        $this->logger->debug(
+            sprintf(
+                '[Karla] Preparing %s API request to %s with payload: %s.',
+                $method,
+                $url,
+                json_encode($orderData),
+            )
+        );
         $response = $this->httpClient->request($method, $url, [
             'headers' => $headers,
             'body' => $jsonPayload,
@@ -369,15 +377,15 @@ class OrderSubscriber implements EventSubscriberInterface
         ]);
         $content = $response->getContent();
         $statusCode = $response->getStatusCode();
-         $this->logger->debug(
-             sprintf(
-                 '[Karla] %s API request sent successfully. Status Code: %s. Response: %s. Payload: %s.',
-                 $method,
-                 $statusCode,
-                 $content,
-                 json_encode($orderData),
-             )
-         );
+        $this->logger->debug(
+            sprintf(
+                '[Karla] %s API request to %s sent successfully. Status Code: %s. Response: %s.',
+                $method,
+                $url,
+                $statusCode,
+                $content,
+            )
+        );
     }
 
     /**
