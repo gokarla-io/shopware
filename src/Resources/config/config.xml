@@ -33,6 +33,16 @@
             <helpText lang="de-DE">Die Basis-URL für Karlas API-Endpunkte.</helpText>
             <defaultValue>https://api.gokarla.io</defaultValue>
         </input-field>
+        <input-field type="float">
+            <name>requestTimeout</name>
+            <label>API Request Timeout (seconds)</label>
+            <label lang="de-DE">API-Request-Timeout (Sekunden)</label>
+            <helpText>Timeout for API requests to Karla.</helpText>
+            <helpText lang="de-DE">Das Timeout für API-Anfragen an Karla an.</helpText>
+            <defaultValue>10.0</defaultValue>
+            <min>1.0</min>
+            <max>30.0</max>
+        </input-field>
     </card>
     <card>
         <title>Order Statuses</title>

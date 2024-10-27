@@ -59,6 +59,7 @@ class OrderSubscriberTest extends TestCase
             ['KarlaDelivery.config.apiUsername', null, 'testUser'],
             ['KarlaDelivery.config.apiKey', null, 'testKey'],
             ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
+            ['KarlaDelivery.config.requestTimeout', null, 10.5],
             // Order Statuses config
             ['KarlaDelivery.config.orderOpen', null, false],
             ['KarlaDelivery.config.orderInProgress', null, true],

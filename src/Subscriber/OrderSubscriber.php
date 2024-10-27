@@ -66,6 +66,11 @@ class OrderSubscriber implements EventSubscriberInterface
     private string $apiUrl;
 
     /**
+     * @var float
+     */
+    private float $requestTimeout;
+
+    /**
      * @var array
      */
     private array $allowedOrderStatuses;
@@ -102,6 +107,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $this->apiUsername = $systemConfigService->get('KarlaDelivery.config.apiUsername') ?? '';
         $this->apiKey = $systemConfigService->get('KarlaDelivery.config.apiKey') ?? '';
         $this->apiUrl = $systemConfigService->get('KarlaDelivery.config.apiUrl') ?? '';
+        $this->requestTimeout = $systemConfigService->get('KarlaDelivery.config.requestTimeout') ?? 10.0;
 
         // Order Statuses Configuration
         $orderOpen = $systemConfigService->get(
@@ -334,7 +340,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
         $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload);
         $this->logger->info(
-            sprintf('[Karla] Sent order "%s" data and %d deliveries to Karla.', $orderNumber, $nDeliveries)
+            sprintf('[Karla] Sent order "%s" data and %d delivery/s to Karla.', $orderNumber, $nDeliveries)
         );
     }
 
@@ -359,6 +365,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $response = $this->httpClient->request($method, $url, [
             'headers' => $headers,
             'body' => $jsonPayload,
+            'timeout' => $this->requestTimeout,
         ]);
         $content = $response->getContent();
         $statusCode = $response->getStatusCode();
