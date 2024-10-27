@@ -181,7 +181,7 @@ class OrderSubscriber implements EventSubscriberInterface
         // Log warnings if configuration values are missing
         if (empty($this->shopSlug) || empty($this->apiKey) || empty($this->apiUrl)) {
             $this->logger->warning(
-                '[Karla] Missing critical configuration values: check shopSlug, apiUsername, apiKey, and/or apiUrl.'
+                'Missing critical configuration values: check shopSlug, apiUsername, apiKey, and/or apiUrl.'
             );
         }
     }
@@ -205,7 +205,7 @@ class OrderSubscriber implements EventSubscriberInterface
     {
         try {
             if (empty($this->shopSlug) || empty($this->apiUsername) || empty($this->apiKey) || empty($this->apiUrl)) {
-                $this->logger->warning('[Karla] Critical configurations missing. Skipping order placement.');
+                $this->logger->warning('Critical configurations missing. Skipping order placement.');
                 return;
             }
 
@@ -237,7 +237,7 @@ class OrderSubscriber implements EventSubscriberInterface
         } catch (\Throwable $t) {
             $this->logger->error(
                 sprintf(
-                    '[Karla] Unexpected error: %s. File: %s, Line: %s',
+                    'Unexpected error: %s. File: %s, Line: %s',
                     $t->getMessage(),
                     $t->getFile(),
                     $t->getLine()
@@ -259,7 +259,7 @@ class OrderSubscriber implements EventSubscriberInterface
         if (!in_array($orderStatus, $this->allowedOrderStatuses, true)) {
             $this->logger->info(
                 sprintf(
-                    '[Karla] Order "%s" skipped: order status is "%s". Allowed order statuses are: %s',
+                    'Order "%s" skipped: order status is "%s". Allowed order statuses are: %s',
                     $orderNumber,
                     $orderStatus,
                     json_encode($this->allowedOrderStatuses)
@@ -301,7 +301,7 @@ class OrderSubscriber implements EventSubscriberInterface
             if (!in_array($deliveryStatus, $this->allowedDeliveryStatuses, true)) {
                 $this->logger->info(
                     sprintf(
-                        '[Karla] Order "%s" delivery skipped: delivery status is "%s". ' .
+                        'Order "%s" delivery skipped: delivery status is "%s". ' .
                         'Allowed delivery statuses are: %s',
                         $orderNumber,
                         $deliveryStatus,
@@ -316,7 +316,7 @@ class OrderSubscriber implements EventSubscriberInterface
             if ($trackingNumber) {
                 $this->logger->debug(
                     sprintf(
-                        '[Karla] Order "%s" delivery found: detected tracking number "%s".',
+                        'Order "%s" delivery found: detected tracking number "%s".',
                         $trackingNumber,
                         $orderNumber,
                     )
@@ -330,7 +330,7 @@ class OrderSubscriber implements EventSubscriberInterface
             } else {
                 $this->logger->info(
                     sprintf(
-                        '[Karla] Order "%s" delivery skipped: delivery has no tracking codes.',
+                        'Order "%s" delivery skipped: delivery has no tracking codes.',
                         $orderNumber,
                     )
                 );
@@ -340,7 +340,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
         $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload);
         $this->logger->info(
-            sprintf('[Karla] Sent order "%s" data and %d delivery/s to Karla.', $orderNumber, $nDeliveries)
+            sprintf('Sent order "%s" data and %d delivery/s to Karla.', $orderNumber, $nDeliveries)
         );
     }
 
@@ -364,7 +364,7 @@ class OrderSubscriber implements EventSubscriberInterface
 
         $this->logger->debug(
             sprintf(
-                '[Karla] Preparing %s API request to %s with payload: %s.',
+                'Preparing %s API request to %s with payload: %s.',
                 $method,
                 $url,
                 json_encode($orderData),
@@ -379,7 +379,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $statusCode = $response->getStatusCode();
         $this->logger->debug(
             sprintf(
-                '[Karla] %s API request to %s sent successfully. Status Code: %s. Response: %s.',
+                '%s API request to %s sent successfully. Status Code: %s. Response: %s.',
                 $method,
                 $url,
                 $statusCode,

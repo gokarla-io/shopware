@@ -1,0 +1,10 @@
+monolog:
+  channels: ["karla_delivery"]
+
+  handlers:
+    karla_delivery:
+      type: rotating_file
+      path: "%kernel.logs_dir%/karla_delivery.log"
+      level: debug
+      channels: ["karla_delivery"]
+      max_files: 30 # Retains logs for up to 30 days
