@@ -1,7 +1,7 @@
 {
   "name": "karla/delivery",
   "description": "Automatically transmit orders from your shop to Karla, providing precise and timely updates to your customers and improving the post-purchase experience.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "shopware-platform-plugin",
   "license": "Apache 2.0",
   "authors": [
