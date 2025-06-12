@@ -18,6 +18,8 @@ use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\Checkout\Order\OrderDefinition;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
+use Shopware\Core\System\Tag\TagEntity;
+use Shopware\Core\System\Tag\TagCollection;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
@@ -186,6 +188,7 @@ class OrderSubscriberTest extends TestCase
         $addressCollection = new OrderAddressCollection([$addressEntity]);
         $orderEntity->method('getAddresses')->willReturn($addressCollection);
         $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
+        $orderEntity->method('getTags')->willReturn(new TagCollection([]));
         return $orderEntity;
     }
 
@@ -242,6 +245,7 @@ class OrderSubscriberTest extends TestCase
         $addressCollection = new OrderAddressCollection([$addressEntity]);
         $orderEntity->method('getAddresses')->willReturn($addressCollection);
         $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
+        $orderEntity->method('getTags')->willReturn(new TagCollection([]));
         return $orderEntity;
     }
 
@@ -349,6 +353,180 @@ class OrderSubscriberTest extends TestCase
                 $this->equalTo('PUT'),
                 $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
                 $this->anything()
+            )
+            ->willReturn($responseMock);
+
+        // Create the OrderSubscriber instance
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Create a mock OrderEntity with tags
+     */
+    private function createOrderEntityWithTagsMock(): OrderEntity {
+        $orderEntity = $this->createOrderEntityMock();
+
+        // Create mock tags
+        $tag1 = $this->createMock(TagEntity::class);
+        $tag1->method('getName')->willReturn('VIP');
+
+        $tag2 = $this->createMock(TagEntity::class);
+        $tag2->method('getName')->willReturn('Priority');
+
+        $tagCollection = new TagCollection([$tag1, $tag2]);
+
+        // Override the getTags method specifically for this test
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('10001');
+        $orderEntity->method('getAmountTotal')->willReturn(100.00);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')
+            ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(10.00);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+        $orderEntity->method('getShippingTotal')->willReturn(0.0);
+
+        // Mock customer
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+
+        // Mock currency
+        $orderEntity->method('getCurrency')->willReturn(null);
+
+        // Mock line items
+        $productLineItemMock = $this->createMock(OrderLineItemEntity::class);
+        $productLineItemMock->method('getId')->willReturn(Uuid::randomHex());
+        $productLineItemMock->method('getType')->willReturn('promotion');
+        $productMock = $this->createMock(ProductEntity::class);
+        $productLineItemMock->method('getProduct')->willReturn($productMock);
+
+        $promotionLineItemMock = $this->createMock(OrderLineItemEntity::class);
+        $promotionLineItemMock->method('getId')->willReturn(Uuid::randomHex());
+        $promotionLineItemMock->method('getType')->willReturn('promotion');
+        $promotionLineItemMock->method('getPayload')->willReturn(
+            ['discountType' => 'percentage', 'code' => 'discountCode']
+        );
+        $promotionMock = $this->createMock(PromotionEntity::class);
+        $promotionMock->method('getCode')->willReturn("discount");
+        $promotionLineItemMock->method('getPromotion')->willReturn($promotionMock);
+
+        $lineItemsCollection = new OrderLineItemCollection(
+            [$productLineItemMock, $promotionLineItemMock]
+        );
+        $orderEntity->method('getLineItems')->willReturn($lineItemsCollection);
+
+        // Mock address
+        $countryEntity = $this->createMock(CountryEntity::class);
+        $countryEntity->method('getName')->willReturn('Example Country');
+        $countryEntity->method('getIso')->willReturn('EX');
+        $stateEntity = $this->createMock(CountryStateEntity::class);
+        $stateEntity->method('getName')->willReturn('Example State');
+        $stateEntity->method('getShortCode')->willReturn('EX-ST');
+        $addressEntity = $this->createMock(OrderAddressEntity::class);
+        $addressEntity->method('getId')->willReturn(Uuid::randomHex());
+        $addressEntity->method('getCountry')->willReturn($countryEntity);
+        $addressEntity->method('getCountryState')->willReturn($stateEntity);
+        $addressEntity->method('getCity')->willReturn('Example City');
+        $addressEntity->method('getStreet')->willReturn('');
+        $addressEntity->method('getAdditionalAddressLine1')->willReturn(null);
+        $addressEntity->method('getFirstName')->willReturn('');
+        $addressEntity->method('getLastName')->willReturn('');
+        $addressEntity->method('getPhoneNumber')->willReturn(null);
+        $addressEntity->method('getZipcode')->willReturn('');
+        $addressCollection = new OrderAddressCollection([$addressEntity]);
+        $orderEntity->method('getAddresses')->willReturn($addressCollection);
+
+        // Mock deliveries
+        $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
+
+        // Mock tags - This is the important part!
+        $orderEntity->method('getTags')->willReturn($tagCollection);
+
+        return $orderEntity;
+    }
+
+    /**
+     * Test the `onOrderWritten` method with an order that has tags
+     */
+    public function testOnOrderWrittenWithTags()
+    {
+        $event = $this->mockOrderEvent(
+            $this->createSalesChannelApiSourceContextMock(),
+            $this->createOrderEntityWithTagsMock(),
+        );
+
+        // Mock HTTP response and its expectation
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Expect the request to be called with segments in the payload
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+                    // Check if segments are present and at least one tag is correctly formatted
+                    return isset($body['order']['segments'])
+                        && !empty($body['order']['segments'])
+                        && (in_array('Shopware.tag.VIP', $body['order']['segments'])
+                            || in_array('Shopware.tag.Priority', $body['order']['segments']));
+                })
+            )
+            ->willReturn($responseMock);
+
+        // Create the OrderSubscriber instance
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test the `onOrderWritten` method with an order that has no tags
+     */
+    public function testOnOrderWrittenWithoutTags()
+    {
+        $orderEntity = $this->createOrderEntityMock();
+        $orderEntity->method('getTags')->willReturn(null);
+
+        $event = $this->mockOrderEvent(
+            $this->createSalesChannelApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Mock HTTP response and its expectation
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Expect the request to be called with empty segments array
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+                    // Check if segments are present but empty
+                    return isset($body['order']['segments'])
+                        && empty($body['order']['segments']);
+                })
             )
             ->willReturn($responseMock);
 

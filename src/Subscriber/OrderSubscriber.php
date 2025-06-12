@@ -226,6 +226,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 'lineItems.product',
                 'orderCustomer',
                 'stateMachineState',
+                'tags',
                 'transactions.stateMachineState',
             ]);
 
@@ -276,6 +277,9 @@ class OrderSubscriber implements EventSubscriberInterface
 
         $lineItemDetails = $this->readLineItems($order->getLineItems());
 
+        // Extract tags from the order and format them as segments
+        $segments = $this->extractOrderTagsAsSegments($order);
+
         $orderUpsertPayload = [
          'id' => $orderNumber,
          'id_type' => 'order_number',
@@ -292,6 +296,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 'address' => ($address = $order->getAddresses()->first()) ? $this->readAddress($address) : null,
                 'currency' => $currencyCode,
                 'external_id' => $order->getId(),
+                'segments' => $segments,
             ],
          'trackings' => [],
         ];
@@ -339,9 +344,21 @@ class OrderSubscriber implements EventSubscriberInterface
 
         $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
         $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload);
-        $this->logger->info(
-            sprintf('Sent order "%s" data and %d delivery/s to Karla.', $orderNumber, $nDeliveries)
-        );
+
+        if (!empty($segments)) {
+            $this->logger->info(
+                sprintf(
+                    'Sent order "%s" data with %d segments and %d delivery/s to Karla.',
+                    $orderNumber,
+                    count($segments),
+                    $nDeliveries
+                )
+            );
+        } else {
+            $this->logger->info(
+                sprintf('Sent order "%s" data and %d delivery/s to Karla.', $orderNumber, $nDeliveries)
+            );
+        }
     }
 
     /**
@@ -475,22 +492,52 @@ class OrderSubscriber implements EventSubscriberInterface
         $state = $address->getCountryState();
 
         $addressData = [
-        'address_line_1' => $address->getStreet(),
-        'address_line_2' => $address->getAdditionalAddressLine1(),
-        'city' => $address->getCity(),
-        'country' => $country instanceof CountryEntity ? $country->getName() : null,
-        'country_code' => $country instanceof CountryEntity ? $country->getIso() : null,
-        'name' => $address->getFirstName() . ' ' . $address->getLastName(),
-        'phone' => $address->getPhoneNumber(),
-        'province' => $state instanceof CountryStateEntity ? $state->getName() : null,
-        'province_code' => $state instanceof CountryStateEntity ? $state->getShortCode() : null,
-        'street' => trim(
-            $address->getStreet() . ', ' . $address->getAdditionalAddressLine1(),
-            ', '
-        ),
-        'zip_code' => $address->getZipcode(),
-        ];
+         'address_line_1' => $address->getStreet(),
+         'address_line_2' => $address->getAdditionalAddressLine1(),
+         'city' => $address->getCity(),
+         'country' => $country instanceof CountryEntity ? $country->getName() : null,
+         'country_code' => $country instanceof CountryEntity ? $country->getIso() : null,
+         'name' => $address->getFirstName() . ' ' . $address->getLastName(),
+         'phone' => $address->getPhoneNumber(),
+         'province' => $state instanceof CountryStateEntity ? $state->getName() : null,
+         'province_code' => $state instanceof CountryStateEntity ? $state->getShortCode() : null,
+         'street' => trim(
+             $address->getStreet() . ', ' . $address->getAdditionalAddressLine1(),
+             ', '
+         ),
+         'zip_code' => $address->getZipcode(),
+         ];
 
         return $addressData;
+    }
+
+    /**
+     * Extract order tags as segments
+     * @param OrderEntity $order
+     * @return array
+     */
+    private function extractOrderTagsAsSegments(OrderEntity $order): array
+    {
+        $segments = [];
+        $tags = $order->getTags();
+
+        if ($tags === null) {
+            return $segments;
+        }
+
+        foreach ($tags as $tag) {
+            $segments[] = "Shopware.tag." . $tag->getName();
+        }
+
+        $this->logger->debug(
+            sprintf(
+                'Order "%s" has %d tags: %s',
+                $order->getOrderNumber(),
+                count($segments),
+                implode(', ', $segments)
+            )
+        );
+
+        return $segments;
     }
 }
