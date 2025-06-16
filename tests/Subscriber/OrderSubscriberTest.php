@@ -76,6 +76,7 @@ class OrderSubscriberTest extends TestCase
             ['KarlaDelivery.config.deliveryCancelled', null, false],
             // Mappings config
             ['KarlaDelivery.config.depositLineItemType', null, ""],
+            ['KarlaDelivery.config.salesChannelMapping', null, ""],
         ]);
     }
 
@@ -189,6 +190,7 @@ class OrderSubscriberTest extends TestCase
         $orderEntity->method('getAddresses')->willReturn($addressCollection);
         $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
         $orderEntity->method('getTags')->willReturn(new TagCollection([]));
+        $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
         return $orderEntity;
     }
 
@@ -246,6 +248,7 @@ class OrderSubscriberTest extends TestCase
         $orderEntity->method('getAddresses')->willReturn($addressCollection);
         $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
         $orderEntity->method('getTags')->willReturn(new TagCollection([]));
+        $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
         return $orderEntity;
     }
 
@@ -369,6 +372,59 @@ class OrderSubscriberTest extends TestCase
     }
 
     /**
+     * Create a mock OrderEntity with a specific sales channel ID
+     */
+    private function createOrderEntityWithSalesChannelMock(string $salesChannelId): OrderEntity {
+        // Create a fresh mock instead of using createOrderEntityMock to avoid conflicts
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('10001');
+        $orderEntity->method('getAmountTotal')->willReturn(100.00);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')
+            ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(10.00);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+        $orderEntity->method('getShippingTotal')->willReturn(0.0);
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+        $orderEntity->method('getCurrency')->willReturn(null);
+
+        // Mock line items
+        $lineItemsCollection = new OrderLineItemCollection([]);
+        $orderEntity->method('getLineItems')->willReturn($lineItemsCollection);
+
+        // Mock address
+        $countryEntity = $this->createMock(CountryEntity::class);
+        $countryEntity->method('getName')->willReturn('Example Country');
+        $countryEntity->method('getIso')->willReturn('EX');
+        $stateEntity = $this->createMock(CountryStateEntity::class);
+        $stateEntity->method('getName')->willReturn('Example State');
+        $stateEntity->method('getShortCode')->willReturn('EX-ST');
+        $addressEntity = $this->createMock(OrderAddressEntity::class);
+        $addressEntity->method('getId')->willReturn(Uuid::randomHex());
+        $addressEntity->method('getCountry')->willReturn($countryEntity);
+        $addressEntity->method('getCountryState')->willReturn($stateEntity);
+        $addressEntity->method('getCity')->willReturn('Example City');
+        $addressEntity->method('getStreet')->willReturn('');
+        $addressEntity->method('getAdditionalAddressLine1')->willReturn(null);
+        $addressEntity->method('getFirstName')->willReturn('');
+        $addressEntity->method('getLastName')->willReturn('');
+        $addressEntity->method('getPhoneNumber')->willReturn(null);
+        $addressEntity->method('getZipcode')->willReturn('');
+        $addressCollection = new OrderAddressCollection([$addressEntity]);
+        $orderEntity->method('getAddresses')->willReturn($addressCollection);
+
+        // Mock deliveries, tags, and SPECIFIC sales channel ID
+        $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
+        $orderEntity->method('getTags')->willReturn(new TagCollection([]));
+        $orderEntity->method('getSalesChannelId')->willReturn($salesChannelId);
+
+        return $orderEntity;
+    }
+
+    /**
      * Create a mock OrderEntity with tags
      */
     private function createOrderEntityWithTagsMock(): OrderEntity {
@@ -451,6 +507,7 @@ class OrderSubscriberTest extends TestCase
 
         // Mock tags - This is the important part!
         $orderEntity->method('getTags')->willReturn($tagCollection);
+        $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
 
         return $orderEntity;
     }
@@ -533,6 +590,73 @@ class OrderSubscriberTest extends TestCase
         // Create the OrderSubscriber instance
         $orderSubscriber = new OrderSubscriber(
             $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test the `onOrderWritten` method with sales channel mapping
+     */
+    public function testOnOrderWrittenWithSalesChannelMapping()
+    {
+        // Setup system config to return sales channel mapping
+        $salesChannelId = Uuid::randomHex();
+        $mappedShopSlug = 'mapped-shop-slug';
+
+        $systemConfigMock = $this->createMock(SystemConfigService::class);
+        $systemConfigMock->method('get')->willReturnMap([
+            // API config
+            ['KarlaDelivery.config.shopSlug', null, 'defaultSlug'],
+            ['KarlaDelivery.config.apiUsername', null, 'testUser'],
+            ['KarlaDelivery.config.apiKey', null, 'testKey'],
+            ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
+            ['KarlaDelivery.config.requestTimeout', null, 10.5],
+            // Order Statuses config
+            ['KarlaDelivery.config.orderOpen', null, false],
+            ['KarlaDelivery.config.orderInProgress', null, true],
+            ['KarlaDelivery.config.orderCompleted', null, false],
+            ['KarlaDelivery.config.orderCancelled', null, false],
+            // Delivery Statuses config
+            ['KarlaDelivery.config.deliveryOpen', null, false],
+            ['KarlaDelivery.config.deliveryShipped', null, true],
+            ['KarlaDelivery.config.deliveryShippedPartially', null, true],
+            ['KarlaDelivery.config.deliveryReturned', null, false],
+            ['KarlaDelivery.config.deliveryReturnedPartially', null, false],
+            ['KarlaDelivery.config.deliveryCancelled', null, false],
+            // Mappings config with sales channel mapping
+            ['KarlaDelivery.config.depositLineItemType', null, ""],
+            ['KarlaDelivery.config.salesChannelMapping', null, $salesChannelId . ':' . $mappedShopSlug],
+        ]);
+
+        $orderEntity = $this->createOrderEntityWithSalesChannelMock($salesChannelId);
+
+        $event = $this->mockOrderEvent(
+            $this->createSalesChannelApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Mock HTTP response and its expectation
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Expect the request to be called with the mapped shop slug
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/' . $mappedShopSlug . '/orders'),
+                $this->anything()
+            )
+            ->willReturn($responseMock);
+
+        // Create the OrderSubscriber instance with the mock config
+        $orderSubscriber = new OrderSubscriber(
+            $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->httpClientMock

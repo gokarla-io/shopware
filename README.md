@@ -56,6 +56,50 @@ composer install
 
 Now you will have all the required PHP files for development
 
+### Code Quality & Formatting
+
+This project uses PHP CodeSniffer with PSR-12 standards for code linting and formatting.
+
+#### Linting
+
+Check code style issues:
+
+```sh
+make lint
+```
+
+#### Auto-formatting
+
+Automatically fix code style issues:
+
+```sh
+make format
+```
+
+#### VSCode Setup
+
+If you're using VSCode, the project includes configuration for automatic formatting:
+
+1. Install the recommended extensions (VSCode will prompt you, or install manually):
+
+   - **phpcbf**: PHP Code Beautifier and Fixer
+   - **phpcs**: PHP CodeSniffer
+   - **PHP Intellisense** or **Intelephense**: PHP language support
+
+2. The workspace is configured to:
+   - Format PHP files on save
+   - Show a ruler at 120 characters (PSR-12 line limit)
+   - Automatically fix linting issues when possible
+   - Trim trailing whitespace and ensure final newlines
+
+#### Testing
+
+Run tests:
+
+```sh
+make test
+```
+
 ### Dockware
 
 Run the docker container

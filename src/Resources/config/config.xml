@@ -144,4 +144,16 @@
             <defaultValue></defaultValue>
         </input-field>
     </card>
+    <card>
+        <title>Sales Channel Mapping</title>
+        <title lang="de-DE">Verkaufskanal-Zuordnung</title>
+        <input-field type="textarea">
+            <name>salesChannelMapping</name>
+            <label>Sales Channel to Shop Slug Mapping</label>
+            <label lang="de-DE">Verkaufskanal zu Shop-Slug-Zuordnung</label>
+            <helpText>Map sales channel IDs to different Karla shop slugs. Format: salesChannelId1:shopSlug1,salesChannelId2:shopSlug2. Leave empty to use default shop slug for all sales channels.</helpText>
+            <helpText lang="de-DE">Ordnen Sie Verkaufskanal-IDs verschiedenen Karla-Shop-Slugs zu. Format: salesChannelId1:shopSlug1,salesChannelId2:shopSlug2. Leer lassen, um Standard-Shop-Slug für alle Verkaufskanäle zu verwenden.</helpText>
+            <defaultValue></defaultValue>
+        </input-field>
+    </card>
 </config>

@@ -86,6 +86,11 @@ class OrderSubscriber implements EventSubscriberInterface
     private string $depositLineItemType;
 
     /**
+     * @var array
+     */
+    private array $salesChannelMapping;
+
+    /**
      * OrderSubscriber constructor.
      * @param SystemConfigService $systemConfigService
      * @param LoggerInterface $logger
@@ -178,6 +183,12 @@ class OrderSubscriber implements EventSubscriberInterface
             'KarlaDelivery.config.depositLineItemType'
         );
 
+        // Sales Channel Mapping Configuration
+        $salesChannelMappingConfig = $systemConfigService->get(
+            'KarlaDelivery.config.salesChannelMapping'
+        ) ?? '';
+        $this->salesChannelMapping = $this->parseSalesChannelMapping($salesChannelMappingConfig);
+
         // Log warnings if configuration values are missing
         if (empty($this->shopSlug) || empty($this->apiKey) || empty($this->apiUrl)) {
             $this->logger->warning(
@@ -225,6 +236,9 @@ class OrderSubscriber implements EventSubscriberInterface
                 'lineItems.product.cover',
                 'lineItems.product',
                 'orderCustomer',
+                'orderCustomer.customer',
+                'orderCustomer.customer.tags',
+                'salesChannel',
                 'stateMachineState',
                 'tags',
                 'transactions.stateMachineState',
@@ -233,7 +247,7 @@ class OrderSubscriber implements EventSubscriberInterface
             $orders = $this->orderRepository->search($criteria, $context);
             foreach ($orders as $order) {
                 $deliveries = $order->getDeliveries();
-                $this->sendKarlaOrder($order, $deliveries);
+                $this->sendKarlaOrder($order, $deliveries, $event);
             }
         } catch (\Throwable $t) {
             $this->logger->error(
@@ -252,8 +266,11 @@ class OrderSubscriber implements EventSubscriberInterface
      * @param OrderEntity $order
      * @param OrderDeliveryCollection $deliveries Array of OrderDeliveryEntity objects
      */
-    private function sendKarlaOrder(OrderEntity $order, OrderDeliveryCollection $deliveries): void
-    {
+    private function sendKarlaOrder(
+        OrderEntity $order,
+        OrderDeliveryCollection $deliveries,
+        EntityWrittenEvent $event
+    ): void {
         $orderNumber = $order->getOrderNumber();
         $orderStatus = $order->getStateMachineState()->getTechnicalName();
 
@@ -342,7 +359,8 @@ class OrderSubscriber implements EventSubscriberInterface
             }
         }
 
-        $url = $this->apiUrl . '/v1/shops/' . $this->shopSlug . '/orders';
+        $shopSlug = $this->getShopSlugForSalesChannel($order->getSalesChannelId());
+        $url = $this->apiUrl . '/v1/shops/' . $shopSlug . '/orders';
         $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload);
 
         if (!empty($segments)) {
@@ -519,19 +537,29 @@ class OrderSubscriber implements EventSubscriberInterface
     private function extractOrderTagsAsSegments(OrderEntity $order): array
     {
         $segments = [];
-        $tags = $order->getTags();
 
-        if ($tags === null) {
-            return $segments;
+        // Add order tags
+        $orderTags = $order->getTags();
+        if ($orderTags !== null) {
+            foreach ($orderTags as $tag) {
+                $segments[] = "Shopware.tag." . $tag->getName();
+            }
         }
 
-        foreach ($tags as $tag) {
-            $segments[] = "Shopware.tag." . $tag->getName();
+        // Add customer tags
+        $orderCustomer = $order->getOrderCustomer();
+        if ($orderCustomer && $orderCustomer->getCustomer()) {
+            $customerTags = $orderCustomer->getCustomer()->getTags();
+            if ($customerTags !== null) {
+                foreach ($customerTags as $tag) {
+                    $segments[] = "Shopware.customer.tag." . $tag->getName();
+                }
+            }
         }
 
         $this->logger->debug(
             sprintf(
-                'Order "%s" has %d tags: %s',
+                'Order "%s" has %d total segments: %s',
                 $order->getOrderNumber(),
                 count($segments),
                 implode(', ', $segments)
@@ -539,5 +567,70 @@ class OrderSubscriber implements EventSubscriberInterface
         );
 
         return $segments;
+    }
+
+    /**
+     * Parse sales channel mapping configuration
+     * @param string $mappingConfig
+     * @return array
+     */
+    private function parseSalesChannelMapping(string $mappingConfig): array
+    {
+        $mapping = [];
+
+        if (empty($mappingConfig)) {
+            return $mapping;
+        }
+
+        $pairs = explode(',', $mappingConfig);
+        foreach ($pairs as $pair) {
+            $parts = explode(':', trim($pair));
+            if (count($parts) === 2) {
+                $salesChannelId = trim($parts[0]);
+                $shopSlug = trim($parts[1]);
+                if (!empty($salesChannelId) && !empty($shopSlug)) {
+                    $mapping[$salesChannelId] = $shopSlug;
+                }
+            }
+        }
+
+        $this->logger->debug(
+            sprintf(
+                'Parsed sales channel mapping: %s',
+                json_encode($mapping)
+            )
+        );
+
+        return $mapping;
+    }
+
+    /**
+     * Get the shop slug for a specific sales channel
+     * @param string|null $salesChannelId
+     * @return string
+     */
+    private function getShopSlugForSalesChannel(?string $salesChannelId): string
+    {
+        if ($salesChannelId && isset($this->salesChannelMapping[$salesChannelId])) {
+            $mappedSlug = $this->salesChannelMapping[$salesChannelId];
+            $this->logger->debug(
+                sprintf(
+                    'Using mapped shop slug "%s" for sales channel "%s"',
+                    $mappedSlug,
+                    $salesChannelId
+                )
+            );
+            return $mappedSlug;
+        }
+
+        $this->logger->debug(
+            sprintf(
+                'Using default shop slug "%s" for sales channel "%s"',
+                $this->shopSlug,
+                $salesChannelId ?? 'unknown'
+            )
+        );
+
+        return $this->shopSlug;
     }
 }
