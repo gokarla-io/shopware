@@ -482,12 +482,32 @@ These warnings don't affect:
 - ✅ Tests
 - ✅ Production code
 
-## Related Resources
+## API & Framework References
 
-- [GoKarla Shopware Documentation](https://docs.gokarla.io/docs/shop-integrations/shopware)
-- [GoKarla API Authentication](https://docs.gokarla.io/docs/api/authentication)
-- [Shopware Plugin Development](https://developer.shopware.com/docs/guides/plugins/overview)
-- [PSR-12 Coding Standard](https://www.php-fig.org/psr/psr-12/)
+### GoKarla API
+
+- **OpenAPI Specification:** <https://api.gokarla.io/public/openapi.json>
+- **Documentation:** <https://docs.gokarla.io/docs/shop-integrations/shopware>
+- **Authentication:** <https://docs.gokarla.io/docs/api/authentication>
+
+**Key Endpoint:** `PUT /v1/shops/{shopSlug}/orders` - Order upsert with tracking
+
+### Shopware Framework
+
+- **Plugin Development:** <https://developer.shopware.com/docs/guides/plugins/overview>
+- **Data Handling (DAL):** <https://developer.shopware.com/docs/guides/plugins/plugins/framework/data-handling/>
+- **Event System:** <https://developer.shopware.com/docs/guides/plugins/plugins/plugin-fundamentals/listening-to-events>
+- **Order Management:** <https://developer.shopware.com/docs/guides/plugins/plugins/checkout/order/>
+
+**Important Shopware Concepts:**
+
+- `OrderLineItem::getId()` returns the line item instance UUID (use as `external_product_id`)
+- `OrderLineItem::getReferencedId()` returns the product/variant UUID (use as `sku`)
+- Use WebFetch on these docs when you need detailed entity/method information
+
+### Coding Standards
+
+- **PSR-12:** <https://www.php-fig.org/psr/psr-12/>
 
 ---
 
