@@ -445,6 +445,8 @@ class OrderSubscriber implements EventSubscriberInterface
                 $cover = $product instanceof ProductEntity ? $product->getCover() : null;
                 $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
                 $products[] = [
+                 'external_product_id' => $lineItem->getId(),
+                 'sku' => $lineItem->getReferencedId(),
                  'title' => $lineItem->getLabel(),
                  'quantity' => $lineItem->getQuantity(),
                  'price' => $lineItem->getUnitPrice(),
@@ -487,6 +489,8 @@ class OrderSubscriber implements EventSubscriberInterface
                 $cover = $product instanceof ProductEntity ? $product->getCover() : null;
                 $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
                 $products[] = [
+                 'external_product_id' => $lineItem->getId(),
+                 'sku' => $lineItem->getReferencedId(),
                  'title' => $lineItem->getLabel(),
                  'quantity' => $lineItem->getQuantity(),
                  'price' => $lineItem->getUnitPrice(),
