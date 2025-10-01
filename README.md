@@ -1,7 +1,7 @@
 # Karla Shopware Extension
 
-[![CI](https://github.com/gokarla/shopware/workflows/ci/badge.svg)](https://github.com/gokarla/shopware/actions)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![ci](https://github.com/gokarla-io/shopware/actions/workflows/ci.yaml/badge.svg)](https://github.com/gokarla-io/shopware/actions/workflows/ci.yaml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.3-blue)](https://www.php.net/)
 [![Shopware](https://img.shields.io/badge/shopware-6.x-blue)](https://www.shopware.com/)
 
