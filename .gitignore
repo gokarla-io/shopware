@@ -39,6 +39,8 @@
 /app/phpunit.xml
 .phpunit.cache/
 .phpunit.result.cache
+coverage/
+coverage.xml
 
 # Build data
 /build/

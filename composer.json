@@ -19,6 +19,11 @@
       "Karla\\Delivery\\": "src/"
     }
   },
+  "autoload-dev": {
+    "psr-4": {
+      "Karla\\Delivery\\Tests\\": "tests/"
+    }
+  },
   "extra": {
     "shopware-plugin-class": "Karla\\Delivery\\KarlaDelivery",
     "copyright": "(c) by GoKarla GmbH",

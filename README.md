@@ -124,6 +124,9 @@ make analyse
 # Run tests with PHPUnit
 make test
 
+# Generate code coverage report
+make coverage
+
 # Run all quality checks
 make check-all
 ```
@@ -134,6 +137,59 @@ make check-all
 - **PHPStan** - Static analysis to catch bugs before runtime
 - **PHPUnit** - Comprehensive test suite
 - **EditorConfig** - Consistent formatting across editors
+
+### Code Coverage
+
+To generate code coverage reports locally, you need Xdebug installed:
+
+**macOS (Homebrew):**
+
+```bash
+# Install with sudo (Homebrew Cellar requires elevated permissions)
+sudo pecl install xdebug
+```
+
+Verify installation:
+
+```bash
+php -m | grep xdebug
+```
+
+Alternative if PECL fails - compile from source:
+
+```bash
+# Download and compile xdebug
+git clone https://github.com/xdebug/xdebug.git
+cd xdebug
+phpize
+./configure
+make
+sudo make install
+
+# Enable in php.ini
+echo "zend_extension=xdebug.so" | sudo tee -a $(php --ini | grep "Loaded Configuration" | sed -e "s|.*:\s*||")
+```
+
+**Linux (Ubuntu/Debian):**
+
+```bash
+sudo apt install php8.3-xdebug
+```
+
+**Docker/Dockware:**
+
+```bash
+# Xdebug is pre-installed in Dockware containers
+```
+
+After installing Xdebug, run:
+
+```bash
+make coverage
+# Open coverage/html/index.html in your browser
+```
+
+Coverage reports are automatically generated in CI and uploaded to [Codecov](https://codecov.io/gh/gokarla/shopware).
 
 ### Local Development with Dockware
 

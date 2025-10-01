@@ -53,11 +53,15 @@ check-all: lint analyse test ## run all quality checks (lint, analyse, test)
 ifdef CI
 # run tests in a CI environment
 test:
-	vendor/bin/phpunit --no-logging
+	vendor/bin/phpunit --no-logging --no-coverage
 else
 test: init ## run tests in the local environment
-	vendor/bin/phpunit
+	vendor/bin/phpunit --no-coverage
 endif
+
+coverage: init ## generate code coverage report
+	XDEBUG_MODE=coverage vendor/bin/phpunit --coverage-html coverage/html --coverage-clover coverage.xml --coverage-text
+	@echo "Coverage report generated in coverage/html/index.html"
 
 
 # Dockware
