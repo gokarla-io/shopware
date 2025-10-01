@@ -291,6 +291,7 @@ class OrderSubscriber implements EventSubscriberInterface
 
         $customer = $order->getOrderCustomer();
         $customerEmail = $customer ? $customer->getEmail() : null;
+        $customerId = $customer && $customer->getCustomer() ? $customer->getCustomer()->getId() : null;
 
         $currency = $order->getCurrency();
         $currencyCode = $currency ? $currency->getIsoCode() : null;
@@ -316,6 +317,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 'address' => ($address = $order->getAddresses()->first()) ? $this->readAddress($address) : null,
                 'currency' => $currencyCode,
                 'external_id' => $order->getId(),
+                'external_customer_id' => $customerId,
                 'segments' => $segments,
             ],
          'trackings' => [],

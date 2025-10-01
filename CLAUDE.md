@@ -379,7 +379,7 @@ Upload through Shopware admin panel → Extensions
 ## Versioning
 
 - Follows [Semantic Versioning](https://semver.org/)
-- Current version in [`composer.json`](composer.json): `0.5.0`
+- Current version in [`composer.json`](composer.json)
 - Automated releases via GitHub Actions on main branch
 
 ## Important Notes for AI Assistants
@@ -512,5 +512,5 @@ These warnings don't affect:
 ---
 
 **Last Updated:** 2025-10-01
-**Plugin Version:** 0.5.0
+**Plugin Version:** 0.6.0
 **Maintained By:** GoKarla GmbH

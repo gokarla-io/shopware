@@ -5,12 +5,54 @@
            xsi:schemaLocation="http://symfony.com/schema/dic/services http://symfony.com/schema/dic/services/services-1.0.xsd">
 
     <services>
+        <!-- Logging -->
+        <service id="Karla\Delivery\Logging\KarlaContextProcessor">
+            <tag name="monolog.processor" channel="karla_delivery"/>
+        </service>
+
         <service id="Karla\Delivery\Subscriber\OrderSubscriber">
             <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService" />
             <argument type="service" id="monolog.logger.karla_delivery"/>
             <argument type="service" id="order.repository"/>
             <argument type="service" id="Symfony\Contracts\HttpClient\HttpClientInterface"/>
             <tag name="kernel.event_subscriber"/>
+        </service>
+
+        <!-- Webhook Services -->
+        <service id="Karla\Delivery\Service\WebhookService">
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="Symfony\Contracts\HttpClient\HttpClientInterface"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+        </service>
+
+        <service id="Karla\Delivery\Controller\Api\WebhookController" public="true">
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="event_dispatcher"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+            <call method="setContainer">
+                <argument type="service" id="service_container"/>
+            </call>
+        </service>
+
+        <service id="Karla\Delivery\Subscriber\WebhookConfigSubscriber">
+            <argument type="service" id="Karla\Delivery\Service\WebhookService"/>
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+            <argument>%env(APP_URL)%</argument>
+            <tag name="kernel.event_subscriber"/>
+        </service>
+
+        <!-- Flow Builder Integration -->
+        <service id="Karla\Delivery\Subscriber\BusinessEventCollectorSubscriber">
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+            <tag name="kernel.event_subscriber"/>
+        </service>
+
+        <!-- Flow Data Storer - Makes Karla data available in email templates -->
+        <service id="Karla\Delivery\Subscriber\KarlaDataStorer">
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+            <tag name="flow.storer"/>
         </service>
     </services>
 </container>
