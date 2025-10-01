@@ -6,6 +6,8 @@ parameters:
     excludePaths:
         - vendor
     reportUnmatchedIgnoredErrors: false
+    # Increase memory limit for large test files
+    tmpDir: var/cache/phpstan
     ignoreErrors:
         - identifier: missingType.iterableValue
         - identifier: missingType.generics

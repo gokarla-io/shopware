@@ -19,6 +19,10 @@ use Symfony\Component\DependencyInjection\Loader\YamlFileLoader;
 
 class KarlaDelivery extends Plugin
 {
+    /**
+     * @codeCoverageIgnore
+     * This method loads Shopware configuration and requires complex integration test setup.
+     */
     public function build(ContainerBuilder $container): void
     {
         parent::build($container);

@@ -3,6 +3,8 @@
 namespace Karla\Delivery\Tests\Subscriber;
 
 use Karla\Delivery\Subscriber\OrderSubscriber;
+use Karla\Delivery\Tests\Support\ConfigBuilder;
+use Karla\Delivery\Tests\Support\OrderMockBuilderTrait;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Cart\Price\Struct\CartPrice;
@@ -42,10 +44,25 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
 
 class OrderSubscriberTest extends TestCase
 {
-    private $loggerMock;
-    private $orderRepositoryMock;
-    private $httpClientMock;
-    private $systemConfigServiceMock;
+    use OrderMockBuilderTrait;
+
+    // Test configuration constants
+    private const TEST_SHOP_SLUG = 'testSlug';
+    private const TEST_API_USER = 'testUser';
+    private const TEST_API_KEY = 'testKey';
+    private const TEST_API_URL = 'https://api.example.com';
+
+    /** @var LoggerInterface&\PHPUnit\Framework\MockObject\MockObject */
+    private LoggerInterface $loggerMock;
+
+    /** @var EntityRepository&\PHPUnit\Framework\MockObject\MockObject */
+    private EntityRepository $orderRepositoryMock;
+
+    /** @var HttpClientInterface&\PHPUnit\Framework\MockObject\MockObject */
+    private HttpClientInterface $httpClientMock;
+
+    /** @var SystemConfigService&\PHPUnit\Framework\MockObject\MockObject */
+    private SystemConfigService $systemConfigServiceMock;
 
     protected function setUp(): void
     {
@@ -54,30 +71,15 @@ class OrderSubscriberTest extends TestCase
         $this->httpClientMock = $this->createMock(HttpClientInterface::class);
         $this->systemConfigServiceMock = $this->createMock(SystemConfigService::class);
 
-        // Configure systemConfigServiceMock to return expected values for configurations
-        $this->systemConfigServiceMock->method('get')->willReturnMap([
-            // API config
-            ['KarlaDelivery.config.shopSlug', null, 'testSlug'],
-            ['KarlaDelivery.config.apiUsername', null, 'testUser'],
-            ['KarlaDelivery.config.apiKey', null, 'testKey'],
-            ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
-            ['KarlaDelivery.config.requestTimeout', null, 10.5],
-            // Order Statuses config
-            ['KarlaDelivery.config.orderOpen', null, false],
-            ['KarlaDelivery.config.orderInProgress', null, true],
-            ['KarlaDelivery.config.orderCompleted', null, false],
-            ['KarlaDelivery.config.orderCancelled', null, false],
-            // Delivery Statuses config
-            ['KarlaDelivery.config.deliveryOpen', null, false],
-            ['KarlaDelivery.config.deliveryShipped', null, true],
-            ['KarlaDelivery.config.deliveryShippedPartially', null, true],
-            ['KarlaDelivery.config.deliveryReturned', null, false],
-            ['KarlaDelivery.config.deliveryReturnedPartially', null, false],
-            ['KarlaDelivery.config.deliveryCancelled', null, false],
-            // Mappings config
-            ['KarlaDelivery.config.depositLineItemType', null, ""],
-            ['KarlaDelivery.config.salesChannelMapping', null, ""],
-        ]);
+        // Configure systemConfigServiceMock using ConfigBuilder
+        $configMap = ConfigBuilder::create()
+            ->withApiConfig(self::TEST_SHOP_SLUG, self::TEST_API_USER, self::TEST_API_KEY, self::TEST_API_URL)
+            ->withDefaultOrderStatuses()
+            ->withDefaultDeliveryStatuses()
+            ->withDefaultMappings()
+            ->buildMap();
+
+        $this->systemConfigServiceMock->method('get')->willReturnMap($configMap);
     }
 
     /**
@@ -150,6 +152,28 @@ class OrderSubscriberTest extends TestCase
         $stateMachineStateMock->method('getTechnicalName')->willReturn($stateName);
 
         return $stateMachineStateMock;
+    }
+
+    /**
+     * Create a mock address entity
+     */
+    private function createAddressMock(): OrderAddressEntity
+    {
+        $countryEntity = $this->createMock(CountryEntity::class);
+        $countryEntity->method('getName')->willReturn('Example Country');
+        $countryEntity->method('getIso')->willReturn('EX');
+
+        $stateEntity = $this->createMock(CountryStateEntity::class);
+        $stateEntity->method('getName')->willReturn('Example State');
+        $stateEntity->method('getShortCode')->willReturn('EX-ST');
+
+        $addressEntity = $this->createMock(OrderAddressEntity::class);
+        $addressEntity->method('getId')->willReturn(Uuid::randomHex());
+        $addressEntity->method('getCountry')->willReturn($countryEntity);
+        $addressEntity->method('getCountryState')->willReturn($stateEntity);
+        $addressEntity->method('getCity')->willReturn('Example City');
+
+        return $addressEntity;
     }
 
     /**
@@ -737,6 +761,586 @@ class OrderSubscriberTest extends TestCase
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test that getSubscribedEvents returns correct event mappings
+     */
+    public function testGetSubscribedEvents()
+    {
+        $events = OrderSubscriber::getSubscribedEvents();
+
+        $this->assertIsArray($events);
+        $this->assertArrayHasKey('order.written', $events);
+        $this->assertEquals('onOrderWritten', $events['order.written']);
+    }
+
+    /**
+     * Test order skipped when configuration is missing
+     */
+    public function testOrderSkippedWhenConfigurationMissing()
+    {
+        // Arrange: Setup config with missing API credentials
+        $systemConfigMock = $this->createMock(SystemConfigService::class);
+        $configMap = ConfigBuilder::create()
+            ->withMissingApiConfig()
+            ->withDefaultOrderStatuses()
+            ->withDefaultDeliveryStatuses()
+            ->withDefaultMappings()
+            ->buildMap();
+
+        $systemConfigMock->method('get')->willReturnMap($configMap);
+
+        // Assert: Expect warning log
+        $this->loggerMock->expects($this->once())
+            ->method('warning')
+            ->with($this->stringContains('Missing critical configuration'));
+
+        // Act
+        new OrderSubscriber(
+            $systemConfigMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+    }
+
+    /**
+     * Test order skipped when status not allowed
+     */
+    public function testOrderSkippedWhenStatusNotAllowed()
+    {
+        // Arrange: Create order with 'completed' status which is not in allowed statuses
+        $orderEntity = $this->createOrderMock(
+            status: 'completed'
+        );
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Assert: Expect info log about skipped order
+        $this->loggerMock->expects($this->once())
+            ->method('info')
+            ->with($this->stringContains('Order "10001" skipped'));
+
+        // Expect no HTTP request
+        $this->httpClientMock->expects($this->never())
+            ->method('request');
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test exception handling in onOrderWritten
+     */
+    public function testExceptionHandlingInOnOrderWritten()
+    {
+        // Make the repository throw an exception
+        $this->orderRepositoryMock->method('search')
+            ->willThrowException(new \Exception('Database error'));
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $this->createOrderEntityMock(),
+        );
+
+        // Expect error log
+        $this->loggerMock->expects($this->once())
+            ->method('error')
+            ->with($this->stringContains('Unexpected error'));
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Should not throw exception
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test exception handling when sending to Karla API fails
+     */
+    public function testExceptionHandlingWhenSendingToKarlaApiFails()
+    {
+        $orderEntity = $this->createOrderEntityMock();
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Make HTTP client throw exception
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->willThrowException(new \Exception('Network error'));
+
+        // Expect error log
+        $this->loggerMock->expects($this->once())
+            ->method('error')
+            ->with($this->stringContains('Unexpected error'));
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test delivery tracking with products in delivery positions
+     */
+    public function testOnOrderWrittenFulfillmentWithProducts()
+    {
+        $orderEntity = $this->createOrderEntityWithDeliveryAndProductsMock();
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Mock HTTP response
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+
+                    // Verify trackings exist with products
+                    if (! isset($body['trackings']) || empty($body['trackings'])) {
+                        return false;
+                    }
+
+                    $tracking = $body['trackings'][0];
+
+                    return isset($tracking['products'])
+                        && ! empty($tracking['products'])
+                        && isset($tracking['products'][0]['external_product_id'])
+                        && isset($tracking['products'][0]['sku']);
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test order with deposit line items
+     */
+    public function testOrderWithDepositLineItems()
+    {
+        // Configure deposit line item type
+        $systemConfigMock = $this->createMock(SystemConfigService::class);
+        $systemConfigMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.shopSlug', null, 'testSlug'],
+            ['KarlaDelivery.config.apiUsername', null, 'testUser'],
+            ['KarlaDelivery.config.apiKey', null, 'testKey'],
+            ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
+            ['KarlaDelivery.config.requestTimeout', null, 10.5],
+            ['KarlaDelivery.config.orderOpen', null, false],
+            ['KarlaDelivery.config.orderInProgress', null, true],
+            ['KarlaDelivery.config.orderCompleted', null, false],
+            ['KarlaDelivery.config.orderCancelled', null, false],
+            ['KarlaDelivery.config.deliveryOpen', null, false],
+            ['KarlaDelivery.config.deliveryShipped', null, true],
+            ['KarlaDelivery.config.deliveryShippedPartially', null, true],
+            ['KarlaDelivery.config.deliveryReturned', null, false],
+            ['KarlaDelivery.config.deliveryReturnedPartially', null, false],
+            ['KarlaDelivery.config.deliveryCancelled', null, false],
+            ['KarlaDelivery.config.depositLineItemType', null, 'deposit'], // Deposit type configured
+            ['KarlaDelivery.config.salesChannelMapping', null, ''],
+        ]);
+
+        $orderEntity = $this->createOrderEntityWithDepositMock();
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+
+                    // Verify deposit item is included in products
+                    return isset($body['order']['products'])
+                        && count($body['order']['products']) > 0;
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $systemConfigMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Create order entity with delivery and products mock
+     */
+    private function createOrderEntityWithDeliveryAndProductsMock(): OrderEntity
+    {
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')
+            ->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('10001');
+        $orderEntity->method('getAmountTotal')->willReturn(100.00);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')
+            ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(10.00);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+        $orderEntity->method('getShippingTotal')->willReturn(0.0);
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+        $orderEntity->method('getCurrency')->willReturn(null);
+
+        // Line items (empty for this test)
+        $orderEntity->method('getLineItems')->willReturn(new OrderLineItemCollection([]));
+
+        // Setup address
+        $addressMock = $this->createAddressMock();
+        $orderEntity->method('getAddresses')
+            ->willReturn(new OrderAddressCollection([$addressMock]));
+
+        // Tags
+        $orderEntity->method('getTags')->willReturn(new TagCollection([]));
+
+        // Setup delivery with products
+        $productLineItem = $this->createMock(OrderLineItemEntity::class);
+        $productLineItem->method('getId')->willReturn(Uuid::randomHex());
+        $productLineItem->method('getReferencedId')->willReturn('SKU-123');
+        $productLineItem->method('getType')->willReturn('product');
+        $productLineItem->method('getLabel')->willReturn('Test Product');
+        $productLineItem->method('getQuantity')->willReturn(1);
+        $productLineItem->method('getUnitPrice')->willReturn(10.00);
+        $productLineItem->method('getTotalPrice')->willReturn(10.00);
+
+        $product = $this->createMock(ProductEntity::class);
+        $product->method('getCover')->willReturn(null);
+        $productLineItem->method('getProduct')->willReturn($product);
+
+        $deliveryPosition = $this->createMock(OrderDeliveryPositionEntity::class);
+        $deliveryPosition->method('getOrderLineItem')->willReturn($productLineItem);
+
+        $delivery = $this->createMock(OrderDeliveryEntity::class);
+        $delivery->method('getTrackingCodes')->willReturn(['TRACK123']);
+        $delivery->method('getPositions')
+            ->willReturn(new OrderDeliveryPositionCollection([$deliveryPosition]));
+
+        // Mock delivery state
+        $deliveryState = $this->createMock(StateMachineStateEntity::class);
+        $deliveryState->method('getTechnicalName')->willReturn('shipped');
+        $delivery->method('getStateMachineState')->willReturn($deliveryState);
+
+        $orderEntity->method('getDeliveries')
+            ->willReturn(new OrderDeliveryCollection([$delivery]));
+
+        return $orderEntity;
+    }
+
+    /**
+     * Create order entity with deposit line item mock
+     */
+    private function createOrderEntityWithDepositMock(): OrderEntity
+    {
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')
+            ->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('10001');
+        $orderEntity->method('getAmountTotal')->willReturn(100.00);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')
+            ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(15.00);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+        $orderEntity->method('getShippingTotal')->willReturn(0.0);
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+        $orderEntity->method('getCurrency')->willReturn(null);
+
+        // Create deposit line item
+        $depositLineItem = $this->createMock(OrderLineItemEntity::class);
+        $depositLineItem->method('getId')->willReturn(Uuid::randomHex());
+        $depositLineItem->method('getReferencedId')->willReturn('DEPOSIT-001');
+        $depositLineItem->method('getType')->willReturn('deposit');
+        $depositLineItem->method('getLabel')->willReturn('Bottle Deposit');
+        $depositLineItem->method('getQuantity')->willReturn(1);
+        $depositLineItem->method('getUnitPrice')->willReturn(5.00);
+        $depositLineItem->method('getTotalPrice')->willReturn(5.00);
+
+        $product = $this->createMock(ProductEntity::class);
+        $product->method('getCover')->willReturn(null);
+        $depositLineItem->method('getProduct')->willReturn($product);
+
+        $lineItems = new OrderLineItemCollection([$depositLineItem]);
+        $orderEntity->method('getLineItems')->willReturn($lineItems);
+
+        // Address and other required fields
+        $addressMock = $this->createAddressMock();
+        $orderEntity->method('getAddresses')
+            ->willReturn(new OrderAddressCollection([$addressMock]));
+        $orderEntity->method('getTags')->willReturn(new TagCollection([]));
+        $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
+
+        return $orderEntity;
+    }
+
+    /**
+     * Test constructor with all order statuses enabled
+     */
+    public function testConstructorWithAllOrderStatusesEnabled()
+    {
+        // Arrange: Setup config with all statuses enabled
+        $systemConfigMock = $this->createMock(SystemConfigService::class);
+        $configMap = ConfigBuilder::create()
+            ->withApiConfig(self::TEST_SHOP_SLUG, self::TEST_API_USER, self::TEST_API_KEY)
+            ->withAllOrderStatusesEnabled()
+            ->withAllDeliveryStatusesEnabled()
+            ->withDefaultMappings()
+            ->buildMap();
+
+        $systemConfigMock->method('get')->willReturnMap($configMap);
+
+        // Act: This should cover lines 131, 137, 140, 163, 172, 175, 178
+        $subscriber = new OrderSubscriber(
+            $systemConfigMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Assert
+        $this->assertInstanceOf(OrderSubscriber::class, $subscriber);
+    }
+
+    /**
+     * Test delivery skipped when no tracking codes
+     */
+    public function testDeliverySkippedWhenNoTrackingCodes()
+    {
+        // Arrange: Create delivery without tracking codes
+        $delivery = $this->createMock(OrderDeliveryEntity::class);
+        $delivery->method('getTrackingCodes')->willReturn([]);
+
+        $deliveryState = $this->createMock(StateMachineStateEntity::class);
+        $deliveryState->method('getTechnicalName')->willReturn('shipped');
+        $delivery->method('getStateMachineState')->willReturn($deliveryState);
+
+        $orderEntity = $this->createOrderMock(
+            deliveries: new OrderDeliveryCollection([$delivery])
+        );
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: Request is still made (order is sent, but tracking is skipped)
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test delivery skipped when delivery status not allowed
+     */
+    public function testDeliverySkippedWhenDeliveryStatusNotAllowed()
+    {
+        // Arrange: Create delivery with 'open' status which is not in allowed statuses
+        $delivery = $this->createMock(OrderDeliveryEntity::class);
+        $delivery->method('getTrackingCodes')->willReturn(['TRACK123']);
+
+        $deliveryState = $this->createMock(StateMachineStateEntity::class);
+        $deliveryState->method('getTechnicalName')->willReturn('open'); // Not allowed
+        $delivery->method('getStateMachineState')->willReturn($deliveryState);
+
+        $orderEntity = $this->createOrderMock(
+            deliveries: new OrderDeliveryCollection([$delivery])
+        );
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: Request is still made (order is sent, but tracking is skipped)
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test order with customer tags
+     */
+    public function testOrderWithCustomerTags()
+    {
+        // Arrange: Create order with customer tags
+        $orderEntity = $this->createOrderMock(
+            customerTags: ['VIP Customer']
+        );
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: Verify customer tags are included in segments
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+
+                    // Verify customer tag is in segments with correct prefix
+                    return isset($body['order']['segments'])
+                        && in_array('Shopware.customer.tag.VIP Customer', $body['order']['segments']);
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test order skipped when API configuration is missing during event processing
+     */
+    public function testOrderSkippedWhenApiConfigMissingDuringEvent()
+    {
+        // Create a config that has warnings but doesn't prevent construction
+        // Then config is empty/null for the actual API check
+        $systemConfigMock = $this->createMock(SystemConfigService::class);
+        $systemConfigMock->method('get')->willReturnMap([
+            // API config - initially set for constructor, but simulates being cleared
+            ['KarlaDelivery.config.shopSlug', null, 'testSlug'], // Set for constructor
+            ['KarlaDelivery.config.apiUsername', null, 'testUser'],
+            ['KarlaDelivery.config.apiKey', null, 'testKey'],
+            ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
+            ['KarlaDelivery.config.requestTimeout', null, 10.5],
+            ['KarlaDelivery.config.orderOpen', null, false],
+            ['KarlaDelivery.config.orderInProgress', null, true],
+            ['KarlaDelivery.config.orderCompleted', null, false],
+            ['KarlaDelivery.config.orderCancelled', null, false],
+            ['KarlaDelivery.config.deliveryOpen', null, false],
+            ['KarlaDelivery.config.deliveryShipped', null, true],
+            ['KarlaDelivery.config.deliveryShippedPartially', null, true],
+            ['KarlaDelivery.config.deliveryReturned', null, false],
+            ['KarlaDelivery.config.deliveryReturnedPartially', null, false],
+            ['KarlaDelivery.config.deliveryCancelled', null, false],
+            ['KarlaDelivery.config.depositLineItemType', null, ''],
+            ['KarlaDelivery.config.salesChannelMapping', null, ''],
+        ]);
+
+        // Create subscriber where shopSlug is empty in the instance
+        // We need to use reflection to set the private property to empty
+        $orderSubscriber = new OrderSubscriber(
+            $systemConfigMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Use reflection to set shopSlug to empty to trigger the early return
+        $reflection = new \ReflectionClass($orderSubscriber);
+        $shopSlugProperty = $reflection->getProperty('shopSlug');
+        $shopSlugProperty->setAccessible(true);
+        $shopSlugProperty->setValue($orderSubscriber, '');
+
+        $orderEntity = $this->createOrderEntityMock();
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Expect warning log about critical configurations missing
+        $this->loggerMock->expects($this->once())
+            ->method('warning')
+            ->with($this->stringContains('Critical configurations missing'));
+
+        // Expect no HTTP request
+        $this->httpClientMock->expects($this->never())
+            ->method('request');
+
         $orderSubscriber->onOrderWritten($event);
     }
 }

@@ -46,9 +46,9 @@ format: init ## automatically format code with PHP-CS-Fixer
 	vendor/bin/php-cs-fixer fix
 
 analyse: init ## run static analysis with PHPStan
-	vendor/bin/phpstan analyse
+	php -d memory_limit=512M vendor/bin/phpstan analyse
 
-check-all: lint analyse test ## run all quality checks (lint, analyse, test)
+check-all: lint analyse test coverage ## run all quality checks (lint, analyse, test, coverage)
 
 ifdef CI
 # run tests in a CI environment
@@ -59,9 +59,10 @@ test: init ## run tests in the local environment
 	vendor/bin/phpunit --no-coverage
 endif
 
-coverage: init ## generate code coverage report
+coverage: init ## generate code coverage report and enforce minimum thresholds
 	XDEBUG_MODE=coverage vendor/bin/phpunit --coverage-html coverage/html --coverage-clover coverage.xml --coverage-text
 	@echo "Coverage report generated in coverage/html/index.html"
+	@php scripts/check-coverage.php
 
 
 # Dockware
