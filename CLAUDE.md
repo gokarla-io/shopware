@@ -15,38 +15,40 @@ This document provides comprehensive context for AI-assisted development of the 
 
 ### Core Components
 
-1. **Main Plugin Class** - [`src/KarlaDelivery.php`](src/KarlaDelivery.php)
+#### **Main Plugin Class** - [`src/KarlaDelivery.php`](src/KarlaDelivery.php)
 
-   - Extends `Shopware\Core\Framework\Plugin`
-   - Handles plugin lifecycle: install, uninstall, activate, update
-   - Loads configuration from `Resources/config/packages/*.yaml`
+- Extends `Shopware\Core\Framework\Plugin`
+- Handles plugin lifecycle: install, uninstall, activate, update
+- Loads configuration from `Resources/config/packages/*.yaml`
 
-2. **Order Event Subscriber** - [`src/Subscriber/OrderSubscriber.php`](src/Subscriber/OrderSubscriber.php)
-   - Implements `EventSubscriberInterface`
-   - Listens to `OrderEvents::ORDER_WRITTEN_EVENT`
-   - Main business logic for sending order data to GoKarla API
-   - Handles order placement, fulfillment, and customer segmentation
+#### **Order Event Subscriber** - [`src/Subscriber/OrderSubscriber.php`](src/Subscriber/OrderSubscriber.php)
+
+- Implements `EventSubscriberInterface`
+- Listens to `OrderEvents::ORDER_WRITTEN_EVENT`
+- Main business logic for sending order data to GoKarla API
+- Handles order placement, fulfillment, and customer segmentation
 
 ### Configuration Files
 
-- **Plugin Config** - [`src/Resources/config/config.xml`](src/Resources/config/config.xml)
+#### **Plugin Config** - [`src/Resources/config/config.xml`](src/Resources/config/config.xml)
 
-  - Defines admin panel configuration UI
-  - API credentials (shop slug, username, API key, URL)
-  - Event trigger configuration (order/delivery statuses)
-  - Line item mappings
-  - Sales channel to shop slug mapping
-  - Supports German (de-DE) and English (en-GB) localization
+- Defines admin panel configuration UI
+- API credentials (shop slug, username, API key, URL)
+- Event trigger configuration (order/delivery statuses)
+- Line item mappings
+- Sales channel to shop slug mapping
+- Supports German (de-DE) and English (en-GB) localization
 
-- **Services Definition** - [`src/Resources/config/services.xml`](src/Resources/config/services.xml)
+#### **Services Definition** - [`src/Resources/config/services.xml`](src/Resources/config/services.xml)
 
-  - Dependency injection configuration
-  - Registers `OrderSubscriber` with required services
+- Dependency injection configuration
+- Registers `OrderSubscriber` with required services
 
-- **Logging Config** - [`src/Resources/config/packages/monolog.yaml`](src/Resources/config/packages/monolog.yaml)
-  - Dedicated log channel: `karla_delivery`
-  - Rotating file handler (30 days retention)
-  - Debug level logging
+#### **Logging Config** - [`src/Resources/config/packages/monolog.yaml`](src/Resources/config/packages/monolog.yaml)
+
+- Dedicated log channel: `karla_delivery`
+- Rotating file handler (30 days retention)
+- Debug level logging
 
 ## Key Features
 
@@ -297,28 +299,29 @@ Upload through Shopware admin panel → Extensions
 
 ## Configuration Best Practices
 
-1. **API Credentials**
+### **API Credentials**
 
-   - Shop slug: Unique identifier for your GoKarla shop
-   - API username: Organization username
-   - API key: Secret key (stored securely as password type)
-   - API URL: Default production or custom endpoint
+- Shop slug: Unique identifier for your GoKarla shop
+- API username: Organization username
+- API key: Secret key (stored securely as password type)
+- API URL: Default production or custom endpoint
 
-2. **Event Triggers**
+### **Event Triggers**
 
-   - Enable order statuses that indicate readiness to ship
-   - Enable delivery statuses when tracking is available
-   - Typically: "In Progress" + "Completed" orders + "Shipped" deliveries
+- Enable order statuses that indicate readiness to ship
+- Enable delivery statuses when tracking is available
+- Typically: "In Progress" + "Completed" orders + "Shipped" deliveries
 
-3. **Line Item Mappings**
+### **Line Item Mappings**
 
-   - Configure deposit line item type if selling beverages with deposits
-   - Only product and deposit types are sent to GoKarla
+- Configure deposit line item type if selling beverages with deposits
+- Only product and deposit types are sent to GoKarla
 
-4. **Sales Channel Mapping**
-   - Map each sales channel to appropriate GoKarla shop
-   - Format: comma-separated `channelId:shopSlug` pairs
-   - Leave empty to use default shop slug for all channels
+### **Sales Channel Mapping**
+
+- Map each sales channel to appropriate GoKarla shop
+- Format: comma-separated `channelId:shopSlug` pairs
+- Leave empty to use default shop slug for all channels
 
 ## Logging
 
@@ -344,16 +347,17 @@ Upload through Shopware admin panel → Extensions
 
 ### Modifying API Payload
 
-1. Update relevant method in `OrderSubscriber`:
+#### Update relevant method in `OrderSubscriber`
 
-   - `sendKarlaOrder()` - Main payload assembly
-   - `readLineItems()` - Product/discount parsing
-   - `readDeliveryPositions()` - Delivery product parsing
-   - `readAddress()` - Address formatting
-   - `extractOrderTagsAsSegments()` - Segmentation logic
+- `sendKarlaOrder()` - Main payload assembly
+- `readLineItems()` - Product/discount parsing
+- `readDeliveryPositions()` - Delivery product parsing
+- `readAddress()` - Address formatting
+- `extractOrderTagsAsSegments()` - Segmentation logic
 
-2. Update corresponding test in [`OrderSubscriberTest.php`](tests/Subscriber/OrderSubscriberTest.php)
-3. Run `make test` to verify
+#### Update corresponding test in [`OrderSubscriberTest.php`](tests/Subscriber/OrderSubscriberTest.php)
+
+#### Run `make test` to verify
 
 ### Adding New Event Subscriptions
 
@@ -367,9 +371,10 @@ Upload through Shopware admin panel → Extensions
 2. **Check API Requests:** Review debug logs for full request/response details
 3. **Verify Configuration:** Check logs for "Missing critical configuration" warnings
 4. **Test with Dockware:**
-   - Admin: [http://localhost/admin] (admin/shopware)
-   - Storefront: [http://localhost]
-   - Logs: [http://localhost/logs]
+
+- Admin: [http://localhost/admin] (admin/shopware)
+- Storefront: [http://localhost]
+- Logs: [http://localhost/logs]
 
 ## Versioning
 
@@ -379,52 +384,53 @@ Upload through Shopware admin panel → Extensions
 
 ## Important Notes for AI Assistants
 
-1. **Shopware Context:** This is a Shopware 6 plugin, not standalone PHP code
+### **Shopware Context:** This is a Shopware 6 plugin, not standalone PHP code
 
-   - Uses Shopware's event system
-   - Relies on Shopware entities (OrderEntity, ProductEntity, etc.)
-   - Follows Shopware plugin architecture patterns
+- Uses Shopware's event system
+- Relies on Shopware entities (OrderEntity, ProductEntity, etc.)
+- Follows Shopware plugin architecture patterns
 
-2. **Type Safety:** Always maintain strict type declarations
+### **Type Safety:** Always maintain strict type declarations
 
-   - All files start with `declare(strict_types=1);`
-   - Type hint all parameters and return values
-   - Handle nullable types explicitly
+- All files start with `declare(strict_types=1);`
+- Type hint all parameters and return values
+- Handle nullable types explicitly
 
-3. **Error Handling:** Broad try-catch in event handlers to prevent breaking shop operations
+### **Error Handling:** Broad try-catch in event handlers to prevent breaking shop operations
 
-   - Log errors comprehensively (message, file, line)
-   - Never throw uncaught exceptions in subscribers
+- Log errors comprehensively (message, file, line)
+- Never throw uncaught exceptions in subscribers
 
-4. **Testing:** Mock all Shopware dependencies in tests
+### **Testing:** Mock all Shopware dependencies in tests
 
-   - Use PHPUnit mocks for entities and services
-   - Test different scenarios (partial orders, tags, mappings)
-   - Verify API calls with argument matchers
+- Use PHPUnit mocks for entities and services
+- Test different scenarios (partial orders, tags, mappings)
+- Verify API calls with argument matchers
 
-5. **Security Considerations:**
+### **Security Considerations:**
 
-   - API credentials stored in Shopware's encrypted config
-   - Use password field type for sensitive data
-   - Log payloads at debug level only
-   - Basic Auth over HTTPS only
+- API credentials stored in Shopware's encrypted config
+- Use password field type for sensitive data
+- Log payloads at debug level only
+- Basic Auth over HTTPS only
 
-6. **Performance:**
+### **Performance:**
 
-   - Event subscribers execute synchronously during order processing
-   - Keep API timeout reasonable (default 10s)
-   - Use rotating logs to prevent disk space issues
-   - Only fetch required entity associations
+- Event subscribers execute synchronously during order processing
+- Keep API timeout reasonable (default 10s)
+- Use rotating logs to prevent disk space issues
+- Only fetch required entity associations
 
-7. **Multi-tenancy:** Support multiple shops via sales channel mapping
+### **Multi-tenancy:** Support multiple shops via sales channel mapping
 
-   - Each sales channel can route to different GoKarla shop
-   - Fallback to default shop slug if unmapped
+- Each sales channel can route to different GoKarla shop
+- Fallback to default shop slug if unmapped
 
-8. **Extensibility Points:**
-   - Configuration is read from SystemConfigService (can be scoped per sales channel)
-   - Event-driven architecture allows parallel event listeners
-   - Line item type filtering is configurable
+### **Extensibility Points:**
+
+- Configuration is read from SystemConfigService (can be scoped per sales channel)
+- Event-driven architecture allows parallel event listeners
+- Line item type filtering is configurable
 
 ## Quick Reference: Key Classes & Methods
 
@@ -441,6 +447,40 @@ Upload through Shopware admin panel → Extensions
 | `extractOrderTagsAsSegments()` | Extracts customer segments      | [OrderSubscriber.php:539](src/Subscriber/OrderSubscriber.php:539)        |
 | `parseSalesChannelMapping()`   | Parses channel→shop config      | [OrderSubscriber.php:579](src/Subscriber/OrderSubscriber.php:579)        |
 | `getShopSlugForSalesChannel()` | Resolves shop slug              | [OrderSubscriber.php:614](src/Subscriber/OrderSubscriber.php:614)        |
+
+## IDE Configuration
+
+### Fixing Intelephense Type Warnings
+
+You may see IDE warnings like:
+
+```text
+Expected type 'object'. Found 'Shopware\Core\Framework\DataAbstractionLayer\Search\TElement'
+```
+
+**This is normal and expected.** Shopware uses generic types that PHP/Intelephense can't fully resolve. The code works correctly at runtime.
+
+**Solutions implemented:**
+
+1. **PHPDoc hints** - Added `@var` annotations for type clarity
+2. **Intelephense config** - Disabled overly strict type checking for Shopware framework
+3. **PHPStorm meta** - Added `.phpstorm.meta.php` for better IDE support
+
+**VSCode settings** (already configured in `.vscode/settings.json`):
+
+```json
+{
+  "intelephense.diagnostics.undefinedMethods": false,
+  "intelephense.diagnostics.undefinedTypes": false
+}
+```
+
+These warnings don't affect:
+
+- ✅ Runtime execution
+- ✅ PHPStan analysis (properly configured)
+- ✅ Tests
+- ✅ Production code
 
 ## Related Resources
 

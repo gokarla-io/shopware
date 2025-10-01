@@ -37,10 +37,18 @@
 
 # PHPUnit
 /app/phpunit.xml
-/phpunit.xml
+.phpunit.cache/
+.phpunit.result.cache
 
 # Build data
 /build/
+
+# PHP-CS-Fixer
+.php-cs-fixer.cache
+
+# PHPStan
+.phpstan.cache/
+phpstan.neon.cache
 
 # Composer PHAR
 /composer.phar

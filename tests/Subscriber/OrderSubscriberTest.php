@@ -6,39 +6,39 @@ use Karla\Delivery\Subscriber\OrderSubscriber;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Cart\Price\Struct\CartPrice;
-use Shopware\Core\Checkout\Promotion\PromotionEntity;
-use Shopware\Core\Content\Media\MediaEntity;
-use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
-use Shopware\Core\Content\Product\ProductEntity;
-use Shopware\Core\Framework\Api\Context\SalesChannelApiSource;
-use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
-use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
-use Shopware\Core\Framework\DataAbstractionLayer\EntityWriteResult;
-use Shopware\Core\Framework\Context;
-use Shopware\Core\Framework\Uuid\Uuid;
-use Shopware\Core\Checkout\Order\OrderDefinition;
-use Shopware\Core\System\SystemConfig\SystemConfigService;
-use Shopware\Core\System\Tag\TagEntity;
-use Shopware\Core\System\Tag\TagCollection;
-use Symfony\Contracts\HttpClient\HttpClientInterface;
-use Symfony\Contracts\HttpClient\ResponseInterface;
-use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
-use Shopware\Core\Checkout\Order\OrderEntity;
-use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
-use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemCollection;
-use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemEntity;
-use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressEntity;
-use Shopware\Core\System\Country\CountryEntity;
-use Shopware\Core\System\Country\Aggregate\CountryState\CountryStateEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressCollection;
+use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDeliveryPosition\OrderDeliveryPositionCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDeliveryPosition\OrderDeliveryPositionEntity;
+use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemCollection;
+use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemEntity;
 use Shopware\Core\Checkout\Order\OrderCollection;
+use Shopware\Core\Checkout\Order\OrderDefinition;
+use Shopware\Core\Checkout\Order\OrderEntity;
+use Shopware\Core\Checkout\Promotion\PromotionEntity;
 use Shopware\Core\Checkout\Shipping\ShippingMethodEntity;
+use Shopware\Core\Content\Media\MediaEntity;
+use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
+use Shopware\Core\Content\Product\ProductEntity;
 use Shopware\Core\Framework\Api\Context\AdminApiSource;
+use Shopware\Core\Framework\Api\Context\SalesChannelApiSource;
+use Shopware\Core\Framework\Context;
+use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\DataAbstractionLayer\EntityWriteResult;
+use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
+use Shopware\Core\Framework\Uuid\Uuid;
+use Shopware\Core\System\Country\Aggregate\CountryState\CountryStateEntity;
+use Shopware\Core\System\Country\CountryEntity;
 use Shopware\Core\System\StateMachine\Aggregation\StateMachineState\StateMachineStateEntity;
+use Shopware\Core\System\SystemConfig\SystemConfigService;
+use Shopware\Core\System\Tag\TagCollection;
+use Shopware\Core\System\Tag\TagEntity;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
 
 class OrderSubscriberTest extends TestCase
 {
@@ -83,7 +83,8 @@ class OrderSubscriberTest extends TestCase
     /**
      * Create a mock OrderEvent based on an order collection
      */
-    private function mockOrderEvent(Context $context, OrderEntity $orderEntity): EntityWrittenEvent {
+    private function mockOrderEvent(Context $context, OrderEntity $orderEntity): EntityWrittenEvent
+    {
         $orderId = Uuid::randomHex();
         $orderData = [
             'id' => $orderId,
@@ -114,27 +115,32 @@ class OrderSubscriberTest extends TestCase
         $this->orderRepositoryMock->expects($this->any())
             ->method('search')
             ->willReturn($entitySearchResult);
+
         return $event;
     }
 
     /**
      * Create a mock Context with a SalesChannelApiSource
      */
-    private function createSalesChannelApiSourceContextMock(): Context {
+    private function createSalesChannelApiSourceContextMock(): Context
+    {
         $salesChannelApiSource = $this->createMock(SalesChannelApiSource::class);
         $salesChannelApiSource->method('getSalesChannelId')->willReturn(Uuid::randomHex());
         $context = $this->createMock(Context::class);
         $context->method('getSource')->willReturn($salesChannelApiSource);
+
         return $context;
     }
 
     /**
      * Create a mock Context with an AdminApiSource
      */
-    private function createAdminApiSourceContextMock(): Context {
+    private function createAdminApiSourceContextMock(): Context
+    {
         $adminApiSource = $this->createMock(AdminApiSource::class);
         $context = $this->createMock(Context::class);
         $context->method('getSource')->willReturn($adminApiSource);
+
         return $context;
     }
 
@@ -142,13 +148,15 @@ class OrderSubscriberTest extends TestCase
     {
         $stateMachineStateMock = $this->createMock(StateMachineStateEntity::class);
         $stateMachineStateMock->method('getTechnicalName')->willReturn($stateName);
+
         return $stateMachineStateMock;
     }
 
     /**
      * Create a mock OrderCollection with a single partial order
      */
-    private function createPartialOrderEntityMock(): OrderEntity {
+    private function createPartialOrderEntityMock(): OrderEntity
+    {
         // Mock order repository
         $orderEntity = $this->createMock(OrderEntity::class);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
@@ -191,13 +199,15 @@ class OrderSubscriberTest extends TestCase
         $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
         $orderEntity->method('getTags')->willReturn(new TagCollection([]));
         $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
+
         return $orderEntity;
     }
 
     /**
      * Create a mock OrderCollection with a single order
      */
-    private function createOrderEntityMock(): OrderEntity {
+    private function createOrderEntityMock(): OrderEntity
+    {
         $orderEntity = $this->createMock(OrderEntity::class);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
@@ -249,13 +259,15 @@ class OrderSubscriberTest extends TestCase
         $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
         $orderEntity->method('getTags')->willReturn(new TagCollection([]));
         $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
+
         return $orderEntity;
     }
 
     /**
      * Create a mock OrderCollection with a single order and delivery
      */
-    private function createOrderEntityWithDeliveryMock(): OrderEntity {
+    private function createOrderEntityWithDeliveryMock(): OrderEntity
+    {
         $orderEntity = $this->createOrderEntityMock();
         $delivery = $this->createMock(OrderDeliveryEntity::class);
         $delivery->method('getTrackingCodes')->willReturn(['123456']);
@@ -271,6 +283,7 @@ class OrderSubscriberTest extends TestCase
             [$deliveryPosition]
         ));
         $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([$delivery]));
+
         return $orderEntity;
     }
 
@@ -280,18 +293,19 @@ class OrderSubscriberTest extends TestCase
     public function testOnOrderWrittenFull()
     {
         $event = $this->mockOrderEvent(
-         $this->createSalesChannelApiSourceContextMock(),
-         $this->createOrderEntityMock(),
+            $this->createSalesChannelApiSourceContextMock(),
+            $this->createOrderEntityMock(),
         );
         // Mock HTTP response and its expectation
         $responseMock = $this->createMock(ResponseInterface::class);
         $responseMock->method('getContent')->willReturn('{"success":true}');
         $this->httpClientMock->expects(
-            $this->once())->method('request')->with(
-                $this->equalTo('PUT'),
-                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
-                $this->anything()
-            )
+            $this->once()
+        )->method('request')->with(
+            $this->equalTo('PUT'),
+            $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+            $this->anything()
+        )
             ->willReturn($responseMock);
 
         // Create the OrderSubscriber instance
@@ -312,18 +326,19 @@ class OrderSubscriberTest extends TestCase
     public function testOnOrderWrittenPartial()
     {
         $event = $this->mockOrderEvent(
-         $this->createSalesChannelApiSourceContextMock(),
-         $this->createPartialOrderEntityMock(),
+            $this->createSalesChannelApiSourceContextMock(),
+            $this->createPartialOrderEntityMock(),
         );
         // Mock HTTP response and its expectation
         $responseMock = $this->createMock(ResponseInterface::class);
         $responseMock->method('getContent')->willReturn('{"success":true}');
         $this->httpClientMock->expects(
-            $this->once())->method('request')->with(
-                $this->equalTo('PUT'),
-                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
-                $this->anything()
-            )
+            $this->once()
+        )->method('request')->with(
+            $this->equalTo('PUT'),
+            $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+            $this->anything()
+        )
             ->willReturn($responseMock);
 
         // Create the OrderSubscriber instance
@@ -345,18 +360,19 @@ class OrderSubscriberTest extends TestCase
     public function testOnOrderWrittenFulfillment()
     {
         $event = $this->mockOrderEvent(
-         $this->createAdminApiSourceContextMock(),
-         $this->createOrderEntityWithDeliveryMock(),
+            $this->createAdminApiSourceContextMock(),
+            $this->createOrderEntityWithDeliveryMock(),
         );
         // Mock HTTP response and its expectation
         $responseMock = $this->createMock(ResponseInterface::class);
         $responseMock->method('getContent')->willReturn('{"success":true}');
         $this->httpClientMock->expects(
-            $this->once())->method('request')->with(
-                $this->equalTo('PUT'),
-                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
-                $this->anything()
-            )
+            $this->once()
+        )->method('request')->with(
+            $this->equalTo('PUT'),
+            $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+            $this->anything()
+        )
             ->willReturn($responseMock);
 
         // Create the OrderSubscriber instance
@@ -374,7 +390,8 @@ class OrderSubscriberTest extends TestCase
     /**
      * Create a mock OrderEntity with a specific sales channel ID
      */
-    private function createOrderEntityWithSalesChannelMock(string $salesChannelId): OrderEntity {
+    private function createOrderEntityWithSalesChannelMock(string $salesChannelId): OrderEntity
+    {
         // Create a fresh mock instead of using createOrderEntityMock to avoid conflicts
         $orderEntity = $this->createMock(OrderEntity::class);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
@@ -427,7 +444,8 @@ class OrderSubscriberTest extends TestCase
     /**
      * Create a mock OrderEntity with tags
      */
-    private function createOrderEntityWithTagsMock(): OrderEntity {
+    private function createOrderEntityWithTagsMock(): OrderEntity
+    {
         $orderEntity = $this->createOrderEntityMock();
 
         // Create mock tags
@@ -534,9 +552,10 @@ class OrderSubscriberTest extends TestCase
                 $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
                 $this->callback(function ($options) {
                     $body = json_decode($options['body'], true);
+
                     // Check if segments are present and at least one tag is correctly formatted
                     return isset($body['order']['segments'])
-                        && !empty($body['order']['segments'])
+                        && ! empty($body['order']['segments'])
                         && (in_array('Shopware.tag.VIP', $body['order']['segments'])
                             || in_array('Shopware.tag.Priority', $body['order']['segments']));
                 })
@@ -580,6 +599,7 @@ class OrderSubscriberTest extends TestCase
                 $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
                 $this->callback(function ($options) {
                     $body = json_decode($options['body'], true);
+
                     // Check if segments are present but empty
                     return isset($body['order']['segments'])
                         && empty($body['order']['segments']);

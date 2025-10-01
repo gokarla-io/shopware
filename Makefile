@@ -8,7 +8,7 @@ MAKEFLAGS += --no-builtin-variables
 
 # General
 
-.PHONY: help init install clean build lint format test
+.PHONY: help init install clean build lint format test analyse check-all
 
 help: ## list available commands
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%-30s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -39,19 +39,24 @@ build: init ## build files for distribution
 	cp composer.json dist/KarlaDelivery/composer.json
 	cd dist && zip -r KarlaDelivery.zip KarlaDelivery
 
-lint: init ## lint syntax code
-	vendor/bin/phpcs src/
+lint: init ## check code style with PHP-CS-Fixer
+	vendor/bin/php-cs-fixer fix --dry-run --diff
 
-format: init ## automatically format code
-	vendor/bin/phpcbf src/
+format: init ## automatically format code with PHP-CS-Fixer
+	vendor/bin/php-cs-fixer fix
+
+analyse: init ## run static analysis with PHPStan
+	vendor/bin/phpstan analyse
+
+check-all: lint analyse test ## run all quality checks (lint, analyse, test)
 
 ifdef CI
-# run tests with coverage in a CI environment
+# run tests in a CI environment
 test:
-	vendor/bin/phpunit --no-logging tests
+	vendor/bin/phpunit --no-logging
 else
-test: init ## run tests with coverage in the local environment
-	vendor/bin/phpunit tests
+test: init ## run tests in the local environment
+	vendor/bin/phpunit
 endif
 
 

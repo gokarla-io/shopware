@@ -1,0 +1,22 @@
+parameters:
+    level: 6
+    paths:
+        - src
+        - tests
+    excludePaths:
+        - vendor
+    reportUnmatchedIgnoredErrors: false
+    ignoreErrors:
+        - identifier: missingType.iterableValue
+        - identifier: missingType.generics
+        # Allow PHPUnit test methods without return types
+        - '#Method Karla\\Delivery\\Tests\\.*::.* has no return type specified\.#'
+        # Allow test helper methods
+        - '#Method Karla\\Delivery\\Tests\\.*::create.* has no return type specified\.#'
+        # Allow test properties without types (PHPUnit pattern)
+        - '#Property Karla\\Delivery\\Tests\\.*::\$.*Mock has no type specified\.#'
+        # Shopware framework issues - these are from the framework itself
+        - '#Call to an undefined method Shopware\\Core\\Framework\\DataAbstractionLayer\\Entity::getDeliveries\(\)\.#'
+        - '#Parameter \#1 \$order of method .* expects Shopware\\Core\\Checkout\\Order\\OrderEntity, Shopware\\Core\\Framework\\DataAbstractionLayer\\Entity given\.#'
+        - '#Class Shopware\\Core\\Checkout\\Shipping\\ShippingMethodEntity constructor invoked with .* parameter.*#'
+        - '#Call to an undefined method Shopware\\Core\\Checkout\\Order\\OrderEntity::method\(\)\.#'

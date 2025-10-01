@@ -5,24 +5,24 @@ declare(strict_types=1);
 namespace Karla\Delivery\Subscriber;
 
 use DateTimeInterface;
-use Shopware\Core\Content\Media\MediaEntity;
-use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
-use Shopware\Core\Content\Product\ProductEntity;
-use Symfony\Component\EventDispatcher\EventSubscriberInterface;
-use Symfony\Contracts\HttpClient\HttpClientInterface;
-use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
-use Shopware\Core\Checkout\Order\OrderEvents;
-use Shopware\Core\System\SystemConfig\SystemConfigService;
-use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
-use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDeliveryPosition\OrderDeliveryPositionCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemCollection;
 use Shopware\Core\Checkout\Order\OrderEntity;
+use Shopware\Core\Checkout\Order\OrderEvents;
+use Shopware\Core\Content\Media\MediaEntity;
+use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
+use Shopware\Core\Content\Product\ProductEntity;
+use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\System\Country\Aggregate\CountryState\CountryStateEntity;
 use Shopware\Core\System\Country\CountryEntity;
+use Shopware\Core\System\SystemConfig\SystemConfigService;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
  * Class OrderSubscriber
@@ -217,6 +217,7 @@ class OrderSubscriber implements EventSubscriberInterface
         try {
             if (empty($this->shopSlug) || empty($this->apiUsername) || empty($this->apiKey) || empty($this->apiUrl)) {
                 $this->logger->warning('Critical configurations missing. Skipping order placement.');
+
                 return;
             }
 
@@ -245,6 +246,7 @@ class OrderSubscriber implements EventSubscriberInterface
             ]);
 
             $orders = $this->orderRepository->search($criteria, $context);
+            /** @var OrderEntity $order */
             foreach ($orders as $order) {
                 $deliveries = $order->getDeliveries();
                 $this->sendKarlaOrder($order, $deliveries, $event);
@@ -274,7 +276,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $orderNumber = $order->getOrderNumber();
         $orderStatus = $order->getStateMachineState()->getTechnicalName();
 
-        if (!in_array($orderStatus, $this->allowedOrderStatuses, true)) {
+        if (! in_array($orderStatus, $this->allowedOrderStatuses, true)) {
             $this->logger->info(
                 sprintf(
                     'Order "%s" skipped: order status is "%s". Allowed order statuses are: %s',
@@ -283,6 +285,7 @@ class OrderSubscriber implements EventSubscriberInterface
                     json_encode($this->allowedOrderStatuses)
                 )
             );
+
             return;
         }
 
@@ -320,7 +323,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $nDeliveries = 0;
         foreach ($deliveries as $delivery) {
             $deliveryStatus = $delivery->getStateMachineState()->getTechnicalName();
-            if (!in_array($deliveryStatus, $this->allowedDeliveryStatuses, true)) {
+            if (! in_array($deliveryStatus, $this->allowedDeliveryStatuses, true)) {
                 $this->logger->info(
                     sprintf(
                         'Order "%s" delivery skipped: delivery status is "%s". ' .
@@ -330,6 +333,7 @@ class OrderSubscriber implements EventSubscriberInterface
                         json_encode($this->allowedDeliveryStatuses)
                     )
                 );
+
                 continue;
             }
             $trackingCodes = $delivery->getTrackingCodes();
@@ -346,7 +350,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 $orderUpsertPayload['trackings'][] = [
                     'tracking_number' => $trackingNumber,
                     'tracking_placed_at' => (new \DateTime())->format(\DateTime::ATOM),
-                    'products' => $this->readDeliveryPositions($delivery->getPositions())
+                    'products' => $this->readDeliveryPositions($delivery->getPositions()),
                 ];
                 $nDeliveries++;
             } else {
@@ -363,7 +367,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $url = $this->apiUrl . '/v1/shops/' . $shopSlug . '/orders';
         $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload);
 
-        if (!empty($segments)) {
+        if (! empty($segments)) {
             $this->logger->info(
                 sprintf(
                     'Sent order "%s" data with %d segments and %d delivery/s to Karla.',
@@ -385,8 +389,6 @@ class OrderSubscriber implements EventSubscriberInterface
      * @param string $url
      * @param string $method
      * @param array $orderData
-     * @param LoggerInterface $logger
-     * @param HttpClientInterface $httpClient
      */
     private function sendRequestToKarlaApi(string $url, string $method, array $orderData): void
     {
@@ -448,7 +450,7 @@ class OrderSubscriber implements EventSubscriberInterface
                  'price' => $lineItem->getUnitPrice(),
                  'images' => $cover instanceof ProductMediaEntity ? [[
                   'src' => $media instanceof MediaEntity ? $media->getUrl() : null,
-                  'alt' => $media instanceof MediaEntity ? $media->getAlt() : null
+                  'alt' => $media instanceof MediaEntity ? $media->getAlt() : null,
                  ]] : [],
                 ];
             } elseif ($lineItem->getType() === 'promotion') {
@@ -490,7 +492,7 @@ class OrderSubscriber implements EventSubscriberInterface
                  'price' => $lineItem->getUnitPrice(),
                  'images' => $cover instanceof ProductMediaEntity ? [[
                   'src' => $media instanceof MediaEntity ? $media->getUrl() : null,
-                  'alt' => $media instanceof MediaEntity ? $media->getAlt() : null
+                  'alt' => $media instanceof MediaEntity ? $media->getAlt() : null,
                  ]] : [],
                 ];
             }
@@ -588,7 +590,7 @@ class OrderSubscriber implements EventSubscriberInterface
             if (count($parts) === 2) {
                 $salesChannelId = trim($parts[0]);
                 $shopSlug = trim($parts[1]);
-                if (!empty($salesChannelId) && !empty($shopSlug)) {
+                if (! empty($salesChannelId) && ! empty($shopSlug)) {
                     $mapping[$salesChannelId] = $shopSlug;
                 }
             }
@@ -620,6 +622,7 @@ class OrderSubscriber implements EventSubscriberInterface
                     $salesChannelId
                 )
             );
+
             return $mappedSlug;
         }
 

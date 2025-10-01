@@ -1,0 +1,18 @@
+# Dependencies
+vendor/
+node_modules/
+
+# Build output
+dist/
+
+# Shopware specific
+var/
+custom/plugins/*/vendor/
+
+# Logs
+*.log
+
+# Cache
+.phpunit.cache/
+.php-cs-fixer.cache
+.phpstan.cache/

@@ -1,140 +1,156 @@
 # Karla Shopware Extension
 
-Simplify your purchase experience in [Shopware](https://www.shopware.com/en/) with Karla
+[![CI](https://github.com/gokarla/shopware/workflows/ci/badge.svg)](https://github.com/gokarla/shopware/actions)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![PHP Version](https://img.shields.io/badge/php-%3E%3D8.3-blue)](https://www.php.net/)
+[![Shopware](https://img.shields.io/badge/shopware-6.x-blue)](https://www.shopware.com/)
+
+Enhance your post-purchase customer experience in [Shopware](https://www.shopware.com/en/) with [GoKarla](https://gokarla.io) - automated order tracking and delivery updates for your customers.
+
+## Overview
+
+The Karla Delivery extension automatically synchronizes your Shopware orders and shipments with GoKarla, enabling you to provide your customers with precise, timely delivery updates and improve satisfaction after purchase.
 
 ## Features
 
-- Place orders (without a tracking code).
-- Update shipment address from an order.
-- Fulfill orders (add a delivery to an order with a tracking code).
+### Core Capabilities
+
+- **Automatic Order Synchronization** - Orders are automatically sent to GoKarla when placed or updated
+- **Shipment Tracking Integration** - Delivery tracking codes are synchronized in real-time
+- **Customer Segmentation** - Leverage order and customer tags for targeted communication
+- **Multi-Channel Support** - Map different sales channels to specific GoKarla shops
+
+### Flexible Configuration
+
+- **Configurable Event Triggers** - Choose which order and delivery statuses trigger synchronization
+- **Line Item Type Mapping** - Support for products, promotions, and custom line item types (e.g., deposits)
+- **Custom API Endpoint** - Use production or custom GoKarla API endpoints
+- **Detailed Logging** - Built-in logging for troubleshooting and monitoring
 
 ## Requirements
 
-- Shopware 6
-- A Karla REST API Key. See [Authentication](https://docs.gokarla.io/docs/api/authentication).
-
-To see the list of prerequisites to run this project locally:
-
-```sh
-make init
-```
+- **Shopware 6** - Compatible with Shopware 6.x
+- **GoKarla Account** - Sign up at [portal.gokarla.io](https://portal.gokarla.io)
+- **API Credentials** - Shop slug and API key from your GoKarla account. See [Authentication](https://docs.gokarla.io/docs/api/authentication).
 
 ## Installation
 
-### Composer
+### Option 1: Via Shopware Admin Panel (Recommended)
 
-Via composer
+1. Download the latest `KarlaDelivery.zip` from [GitHub Releases](https://github.com/gokarla/shopware/releases)
+2. In Shopware admin, navigate to **Extensions** → **My Extensions**
+3. Click **Upload extension** and select the downloaded ZIP file
+4. Click **Install** and then **Activate**
+5. Configure your API credentials in the extension settings
+
+For detailed instructions, see [Shopware Integration Documentation](https://docs.gokarla.io/docs/shop-integrations/shopware).
+
+### Option 2: Via Composer
 
 ```bash
 composer require gokarla/shopware
-```
-
-### Zip file via console
-
-Extract the .zip file to `<installation-root>/custom/plugins`.
-
-Run the following commands in your `<installation-root>`
-
-```sh
+bin/console plugin:refresh
 bin/console plugin:install --activate KarlaDelivery
 bin/console cache:clear
 ```
 
-### Zip file via UI dashboard
+### Option 3: Manual Installation via Console
 
-Download a .zip release and upload it in through your admin panel.
-See [Shopware Integration](https://docs.gokarla.io/docs/shop-integrations/shopware) for more information.
+1. Download and extract `KarlaDelivery.zip` to `<shopware-root>/custom/plugins/`
+2. Run the following commands:
 
-## Development
+```bash
+bin/console plugin:refresh
+bin/console plugin:install --activate KarlaDelivery
+bin/console cache:clear
+```
 
-First install all the dependencies
+## Configuration
 
-```sh
-composer dump-autoload
+After installation, configure the extension:
+
+1. Go to **Extensions** → **My Extensions** → **Karla Delivery** → **Configure**
+2. Enter your **Shop Slug** and **API Key** from your GoKarla account
+3. Configure which order and delivery statuses should trigger synchronization
+4. (Optional) Set up sales channel mapping for multi-shop setups
+5. Save the configuration
+
+**Recommended Settings:**
+
+- Order Statuses: Enable "In Progress" and "Completed"
+- Delivery Statuses: Enable "Shipped" and "Shipped Partially"
+
+## Support
+
+- **Documentation**: [docs.gokarla.io](https://docs.gokarla.io/docs/shop-integrations/shopware)
+- **Issues**: [GitHub Issues](https://github.com/gokarla/shopware/issues)
+- **Contact**: For additional support, contact your GoKarla account manager
+
+## Contributing
+
+We welcome contributions! This is an open-source project under the Apache 2.0 License.
+
+**Quality Standards:**
+
+- All code must pass `make check-all` (linting, static analysis, and tests)
+- Follow PSR-12 coding standards
+- Add tests for new features
+- Update documentation as needed
+
+### Development Setup
+
+Install dependencies:
+
+```bash
 composer install
 ```
 
-Now you will have all the required PHP files for development
+### Code Quality
 
-### Code Quality & Formatting
+This project follows PSR-12 coding standards and uses modern PHP tooling for quality assurance.
 
-This project uses PHP CodeSniffer with PSR-12 standards for code linting and formatting.
+**Available Commands:**
 
-#### Linting
-
-Check code style issues:
-
-```sh
+```bash
+# Check code style with PHP-CS-Fixer
 make lint
-```
 
-#### Auto-formatting
-
-Automatically fix code style issues:
-
-```sh
+# Auto-fix code style issues
 make format
-```
 
-#### VSCode Setup
+# Run static analysis with PHPStan
+make analyse
 
-If you're using VSCode, the project includes configuration for automatic formatting:
-
-1. Install the recommended extensions (VSCode will prompt you, or install manually):
-
-   - **phpcbf**: PHP Code Beautifier and Fixer
-   - **phpcs**: PHP CodeSniffer
-   - **PHP Intellisense** or **Intelephense**: PHP language support
-
-2. The workspace is configured to:
-   - Format PHP files on save
-   - Show a ruler at 120 characters (PSR-12 line limit)
-   - Automatically fix linting issues when possible
-   - Trim trailing whitespace and ensure final newlines
-
-#### Testing
-
-Run tests:
-
-```sh
+# Run tests with PHPUnit
 make test
+
+# Run all quality checks
+make check-all
 ```
 
-### Dockware
+**Tooling:**
 
-Run the docker container
+- **PHP-CS-Fixer** - Fast, modern code formatter
+- **PHPStan** - Static analysis to catch bugs before runtime
+- **PHPUnit** - Comprehensive test suite
+- **EditorConfig** - Consistent formatting across editors
 
-```sh
+### Local Development with Dockware
+
+Start a local Shopware instance:
+
+```bash
 make dockware-start
-```
-
-Attach yourself to it
-
-```sh
 make dockware-attach
 ```
 
-### Access shop
+Access the development shop:
 
-- Navigate to <http://localhost/admin> and type user `admin` and password `shopware`
-  to access the admin panel.
-  - Go to `Extensions`, `My extensions` and make sure that the `Karla Delivery` extension is active.
-  - Go to the extension settings and provide a shop slug and api key.
-- Navigate to <http://localhost> to see the shop and create test orders
-- Navigate to <http://localhost/logs> to browse the logs
+- **Admin Panel**: <http://localhost/admin> (credentials: `admin` / `shopware`)
+- **Storefront**: <http://localhost>
+- **Logs**: <http://localhost/logs>
 
-### Manual Testing
-
-#### Create an order
-
-Go to the shop at <http://localhost> and order something. This should trigger the webhook
-and the backend should receive its payload in the shopware hook endpoint.
-
-#### Ship an order
-
-Go to the admin panel at <http://localhost/admin>, select an order, go to `Details`
-and update the delivery status to `Shipped`. This will trigger a webhook as defined
-in the Shopware app manifest and the backend should receive its payload in the shopware hook endpoint.
+For detailed development guidelines, see [CLAUDE.md](CLAUDE.md).
 
 ## Versioning
 
