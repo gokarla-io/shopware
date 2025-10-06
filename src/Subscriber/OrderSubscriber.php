@@ -253,6 +253,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 'lineItems.product',
                 'orderCustomer',
                 'orderCustomer.customer',
+                'orderCustomer.customer.group',
                 'orderCustomer.customer.tags',
                 'salesChannel',
                 'stateMachineState',
@@ -575,15 +576,30 @@ class OrderSubscriber implements EventSubscriberInterface
             }
         }
 
-        // Add customer tags
+        // Add customer tags (using same prefix as order tags)
         $orderCustomer = $order->getOrderCustomer();
         if ($orderCustomer && $orderCustomer->getCustomer()) {
-            $customerTags = $orderCustomer->getCustomer()->getTags();
+            $customer = $orderCustomer->getCustomer();
+
+            // Customer tags
+            $customerTags = $customer->getTags();
             if ($customerTags !== null) {
                 foreach ($customerTags as $tag) {
-                    $segments[] = "Shopware.customer.tag." . $tag->getName();
+                    $segments[] = "Shopware.tag." . $tag->getName();
                 }
             }
+
+            // Customer group
+            $customerGroup = $customer->getGroup();
+            if ($customerGroup) {
+                $segments[] = "Shopware.customer_group." . $customerGroup->getName();
+            }
+        }
+
+        // Add sales channel
+        $salesChannel = $order->getSalesChannel();
+        if ($salesChannel) {
+            $segments[] = "Shopware.sales_channel." . $salesChannel->getName();
         }
 
         if ($this->debugMode) {

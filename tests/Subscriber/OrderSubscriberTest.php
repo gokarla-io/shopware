@@ -1264,7 +1264,7 @@ class OrderSubscriberTest extends TestCase
         $responseMock = $this->createMock(ResponseInterface::class);
         $responseMock->method('getContent')->willReturn('{"success":true}');
 
-        // Assert: Verify customer tags are included in segments
+        // Assert: Verify customer tags are included in segments with Shopware.tag prefix
         $this->httpClientMock->expects($this->once())
             ->method('request')
             ->with(
@@ -1273,9 +1273,9 @@ class OrderSubscriberTest extends TestCase
                 $this->callback(function ($options) {
                     $body = json_decode($options['body'], true);
 
-                    // Verify customer tag is in segments with correct prefix
+                    // Verify customer tag is in segments with correct prefix (Shopware.tag)
                     return isset($body['order']['segments'])
-                        && in_array('Shopware.customer.tag.VIP Customer', $body['order']['segments']);
+                        && in_array('Shopware.tag.VIP Customer', $body['order']['segments']);
                 })
             )
             ->willReturn($responseMock);
@@ -1672,6 +1672,71 @@ class OrderSubscriberTest extends TestCase
             $this->httpClientMock
         );
 
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test order with all segment sources (order tags, customer tags, customer group, sales channel)
+     */
+    public function testOnOrderWrittenWithAllSegmentSources()
+    {
+        // Arrange: Create order with all segment sources
+        $orderEntity = $this->createOrderMock(
+            orderNumber: '10001',
+            tags: ['Priority', 'Urgent'],
+            customerTags: ['VIP', 'Loyalty'],
+            customerGroup: 'B2B',
+            salesChannel: 'Headless'
+        );
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: Verify all segment sources are included
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+                    $segments = $body['order']['segments'] ?? [];
+
+                    // Verify all 4 segment sources are present
+                    // Order tags: Priority, Urgent (both use Shopware.tag prefix)
+                    // Customer tags: VIP, Loyalty (both use Shopware.tag prefix)
+                    // Customer group: B2B
+                    // Sales channel: Headless
+                    // Total should be at least 4 (could be 6 if all tags are unique)
+                    $hasOrderTags = in_array('Shopware.tag.Priority', $segments)
+                        || in_array('Shopware.tag.Urgent', $segments);
+                    $hasCustomerTags = in_array('Shopware.tag.VIP', $segments)
+                        || in_array('Shopware.tag.Loyalty', $segments);
+                    $hasCustomerGroup = in_array('Shopware.customer_group.B2B', $segments);
+                    $hasSalesChannel = in_array('Shopware.sales_channel.Headless', $segments);
+
+                    return count($segments) >= 4
+                        && $hasOrderTags
+                        && $hasCustomerTags
+                        && $hasCustomerGroup
+                        && $hasSalesChannel;
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
         $orderSubscriber->onOrderWritten($event);
     }
 }

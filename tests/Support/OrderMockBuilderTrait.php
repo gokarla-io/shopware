@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Karla\Delivery\Tests\Support;
 
 use Shopware\Core\Checkout\Cart\Price\Struct\CartPrice;
+use Shopware\Core\Checkout\Customer\Aggregate\CustomerGroup\CustomerGroupEntity;
 use Shopware\Core\Checkout\Customer\CustomerEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressEntity;
@@ -15,6 +16,7 @@ use Shopware\Core\Checkout\Order\OrderEntity;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\Country\Aggregate\CountryState\CountryStateEntity;
 use Shopware\Core\System\Country\CountryEntity;
+use Shopware\Core\System\SalesChannel\SalesChannelEntity;
 use Shopware\Core\System\StateMachine\Aggregation\StateMachineState\StateMachineStateEntity;
 use Shopware\Core\System\Tag\TagCollection;
 use Shopware\Core\System\Tag\TagEntity;
@@ -43,6 +45,8 @@ trait OrderMockBuilderTrait
      * @param string $status Order status (default: 'in_progress')
      * @param array<string> $tags Order tag names
      * @param array<string> $customerTags Customer tag names
+     * @param string|null $customerGroup Customer group name
+     * @param string|null $salesChannel Sales channel name
      * @param OrderDeliveryCollection|null $deliveries Delivery collection
      * @param OrderLineItemCollection|null $lineItems Line item collection
      * @param bool $includeAddress Whether to include address (default: true)
@@ -54,6 +58,8 @@ trait OrderMockBuilderTrait
         string $status = 'in_progress',
         array $tags = [],
         array $customerTags = [],
+        ?string $customerGroup = null,
+        ?string $salesChannel = null,
         ?OrderDeliveryCollection $deliveries = null,
         ?OrderLineItemCollection $lineItems = null,
         bool $includeAddress = true
@@ -88,17 +94,31 @@ trait OrderMockBuilderTrait
         }
         $orderEntity->method('getTags')->willReturn($tagCollection);
 
-        // Customer with tags
-        if (! empty($customerTags)) {
-            $customerTagCollection = new TagCollection();
-            foreach ($customerTags as $tagName) {
-                $tag = $this->createMock(TagEntity::class);
-                $tag->method('getName')->willReturn($tagName);
-                $customerTagCollection->add($tag);
+        // Customer with tags and group
+        if (! empty($customerTags) || $customerGroup !== null) {
+            $customer = $this->createMock(CustomerEntity::class);
+
+            // Customer tags
+            if (! empty($customerTags)) {
+                $customerTagCollection = new TagCollection();
+                foreach ($customerTags as $tagName) {
+                    $tag = $this->createMock(TagEntity::class);
+                    $tag->method('getName')->willReturn($tagName);
+                    $customerTagCollection->add($tag);
+                }
+                $customer->method('getTags')->willReturn($customerTagCollection);
+            } else {
+                $customer->method('getTags')->willReturn(null);
             }
 
-            $customer = $this->createMock(CustomerEntity::class);
-            $customer->method('getTags')->willReturn($customerTagCollection);
+            // Customer group
+            if ($customerGroup !== null) {
+                $groupEntity = $this->createMock(CustomerGroupEntity::class);
+                $groupEntity->method('getName')->willReturn($customerGroup);
+                $customer->method('getGroup')->willReturn($groupEntity);
+            } else {
+                $customer->method('getGroup')->willReturn(null);
+            }
 
             $orderCustomer = $this->createMock(OrderCustomerEntity::class);
             $orderCustomer->method('getCustomer')->willReturn($customer);
@@ -106,6 +126,15 @@ trait OrderMockBuilderTrait
             $orderEntity->method('getOrderCustomer')->willReturn($orderCustomer);
         } else {
             $orderEntity->method('getOrderCustomer')->willReturn(null);
+        }
+
+        // Sales channel
+        if ($salesChannel !== null) {
+            $salesChannelEntity = $this->createMock(SalesChannelEntity::class);
+            $salesChannelEntity->method('getName')->willReturn($salesChannel);
+            $orderEntity->method('getSalesChannel')->willReturn($salesChannelEntity);
+        } else {
+            $orderEntity->method('getSalesChannel')->willReturn(null);
         }
 
         // Currency
