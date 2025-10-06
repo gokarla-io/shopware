@@ -91,6 +91,11 @@ class OrderSubscriber implements EventSubscriberInterface
     private array $salesChannelMapping;
 
     /**
+     * @var bool
+     */
+    private bool $debugMode;
+
+    /**
      * OrderSubscriber constructor.
      * @param SystemConfigService $systemConfigService
      * @param LoggerInterface $logger
@@ -106,6 +111,9 @@ class OrderSubscriber implements EventSubscriberInterface
         $this->logger = $logger;
         $this->orderRepository = $orderRepository;
         $this->httpClient = $httpClient;
+
+        // General Configuration
+        $this->debugMode = $systemConfigService->get('KarlaDelivery.config.debugMode') ?? false;
 
         // API Configuration
         $this->shopSlug = $systemConfigService->get('KarlaDelivery.config.shopSlug') ?? '';
@@ -191,9 +199,14 @@ class OrderSubscriber implements EventSubscriberInterface
 
         // Log warnings if configuration values are missing
         if (empty($this->shopSlug) || empty($this->apiKey) || empty($this->apiUrl)) {
-            $this->logger->warning(
-                'Missing critical configuration values: check shopSlug, apiUsername, apiKey, and/or apiUrl.'
-            );
+            $this->logger->warning('Missing critical configuration values', [
+                'component' => 'order.config',
+                'missing_fields' => array_filter([
+                    'shopSlug' => empty($this->shopSlug),
+                    'apiKey' => empty($this->apiKey),
+                    'apiUrl' => empty($this->apiUrl),
+                ]),
+            ]);
         }
     }
 
@@ -216,7 +229,9 @@ class OrderSubscriber implements EventSubscriberInterface
     {
         try {
             if (empty($this->shopSlug) || empty($this->apiUsername) || empty($this->apiKey) || empty($this->apiUrl)) {
-                $this->logger->warning('Critical configurations missing. Skipping order placement.');
+                $this->logger->warning('Order sync skipped - missing configuration', [
+                    'component' => 'order.sync',
+                ]);
 
                 return;
             }
@@ -252,14 +267,13 @@ class OrderSubscriber implements EventSubscriberInterface
                 $this->sendKarlaOrder($order, $deliveries, $event);
             }
         } catch (\Throwable $t) {
-            $this->logger->error(
-                sprintf(
-                    'Unexpected error: %s. File: %s, Line: %s',
-                    $t->getMessage(),
-                    $t->getFile(),
-                    $t->getLine()
-                )
-            );
+            $this->logger->error('Unexpected error during order sync', [
+                'component' => 'order.sync',
+                'error' => $t->getMessage(),
+                'file' => $t->getFile(),
+                'line' => $t->getLine(),
+                'trace' => $t->getTraceAsString(),
+            ]);
         }
     }
 
@@ -277,14 +291,12 @@ class OrderSubscriber implements EventSubscriberInterface
         $orderStatus = $order->getStateMachineState()->getTechnicalName();
 
         if (! in_array($orderStatus, $this->allowedOrderStatuses, true)) {
-            $this->logger->info(
-                sprintf(
-                    'Order "%s" skipped: order status is "%s". Allowed order statuses are: %s',
-                    $orderNumber,
-                    $orderStatus,
-                    json_encode($this->allowedOrderStatuses)
-                )
-            );
+            $this->logger->info('Order skipped - status not allowed', [
+                'component' => 'order.sync',
+                'order_number' => $orderNumber,
+                'order_status' => $orderStatus,
+                'allowed_statuses' => $this->allowedOrderStatuses,
+            ]);
 
             return;
         }
@@ -347,15 +359,12 @@ class OrderSubscriber implements EventSubscriberInterface
         foreach ($deliveries as $delivery) {
             $deliveryStatus = $delivery->getStateMachineState()->getTechnicalName();
             if (! in_array($deliveryStatus, $this->allowedDeliveryStatuses, true)) {
-                $this->logger->info(
-                    sprintf(
-                        'Order "%s" delivery skipped: delivery status is "%s". ' .
-                        'Allowed delivery statuses are: %s',
-                        $orderNumber,
-                        $deliveryStatus,
-                        json_encode($this->allowedDeliveryStatuses)
-                    )
-                );
+                $this->logger->info('Delivery skipped - status not allowed', [
+                    'component' => 'order.sync',
+                    'order_number' => $orderNumber,
+                    'delivery_status' => $deliveryStatus,
+                    'allowed_statuses' => $this->allowedDeliveryStatuses,
+                ]);
 
                 continue;
             }
@@ -363,13 +372,13 @@ class OrderSubscriber implements EventSubscriberInterface
             // Supports only one tracking code per delivery
             $trackingNumber = $trackingCodes ? $trackingCodes[0] : null;
             if ($trackingNumber) {
-                $this->logger->debug(
-                    sprintf(
-                        'Order "%s" delivery found: detected tracking number "%s".',
-                        $trackingNumber,
-                        $orderNumber,
-                    )
-                );
+                if ($this->debugMode) {
+                    $this->logger->debug('Delivery found with tracking number', [
+                        'component' => 'order.sync',
+                        'order_number' => $orderNumber,
+                        'tracking_number' => $trackingNumber,
+                    ]);
+                }
                 $orderUpsertPayload['trackings'][] = [
                     'tracking_number' => $trackingNumber,
                     'tracking_placed_at' => (new \DateTime())->format(\DateTime::ATOM),
@@ -377,12 +386,10 @@ class OrderSubscriber implements EventSubscriberInterface
                 ];
                 $nDeliveries++;
             } else {
-                $this->logger->info(
-                    sprintf(
-                        'Order "%s" delivery skipped: delivery has no tracking codes.',
-                        $orderNumber,
-                    )
-                );
+                $this->logger->info('Delivery skipped - no tracking codes', [
+                    'component' => 'order.sync',
+                    'order_number' => $orderNumber,
+                ]);
             }
         }
 
@@ -390,20 +397,13 @@ class OrderSubscriber implements EventSubscriberInterface
         $url = $this->apiUrl . '/v1/shops/' . $shopSlug . '/orders';
         $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload);
 
-        if (! empty($segments)) {
-            $this->logger->info(
-                sprintf(
-                    'Sent order "%s" data with %d segments and %d delivery/s to Karla.',
-                    $orderNumber,
-                    count($segments),
-                    $nDeliveries
-                )
-            );
-        } else {
-            $this->logger->info(
-                sprintf('Sent order "%s" data and %d delivery/s to Karla.', $orderNumber, $nDeliveries)
-            );
-        }
+        $this->logger->info('Order synced to Karla successfully', [
+            'component' => 'order.sync',
+            'order_number' => $orderNumber,
+            'deliveries_count' => $nDeliveries,
+            'segments_count' => count($segments),
+            'segments' => ! empty($segments) ? $segments : null,
+        ]);
     }
 
     /**
@@ -422,14 +422,14 @@ class OrderSubscriber implements EventSubscriberInterface
             'Content-Type' => 'application/json',
         ];
 
-        $this->logger->debug(
-            sprintf(
-                'Preparing %s API request to %s with payload: %s.',
-                $method,
-                $url,
-                json_encode($orderData),
-            )
-        );
+        if ($this->debugMode) {
+            $this->logger->debug('Preparing API request to Karla', [
+                'component' => 'order.api',
+                'method' => $method,
+                'url' => $url,
+                'payload' => $orderData,
+            ]);
+        }
         $response = $this->httpClient->request($method, $url, [
             'headers' => $headers,
             'body' => $jsonPayload,
@@ -437,15 +437,15 @@ class OrderSubscriber implements EventSubscriberInterface
         ]);
         $content = $response->getContent();
         $statusCode = $response->getStatusCode();
-        $this->logger->debug(
-            sprintf(
-                '%s API request to %s sent successfully. Status Code: %s. Response: %s.',
-                $method,
-                $url,
-                $statusCode,
-                $content,
-            )
-        );
+        if ($this->debugMode) {
+            $this->logger->debug('API request to Karla completed', [
+                'component' => 'order.api',
+                'method' => $method,
+                'url' => $url,
+                'status_code' => $statusCode,
+                'response' => $content,
+            ]);
+        }
     }
 
     /**
@@ -586,14 +586,14 @@ class OrderSubscriber implements EventSubscriberInterface
             }
         }
 
-        $this->logger->debug(
-            sprintf(
-                'Order "%s" has %d total segments: %s',
-                $order->getOrderNumber(),
-                count($segments),
-                implode(', ', $segments)
-            )
-        );
+        if ($this->debugMode) {
+            $this->logger->debug('Order segments determined', [
+                'component' => 'order.sync',
+                'order_number' => $order->getOrderNumber(),
+                'segments_count' => count($segments),
+                'segments' => $segments,
+            ]);
+        }
 
         return $segments;
     }
@@ -623,12 +623,12 @@ class OrderSubscriber implements EventSubscriberInterface
             }
         }
 
-        $this->logger->debug(
-            sprintf(
-                'Parsed sales channel mapping: %s',
-                json_encode($mapping)
-            )
-        );
+        if ($this->debugMode) {
+            $this->logger->debug('Sales channel mapping parsed', [
+                'component' => 'order.config',
+                'mapping' => $mapping,
+            ]);
+        }
 
         return $mapping;
     }
@@ -642,24 +642,24 @@ class OrderSubscriber implements EventSubscriberInterface
     {
         if ($salesChannelId && isset($this->salesChannelMapping[$salesChannelId])) {
             $mappedSlug = $this->salesChannelMapping[$salesChannelId];
-            $this->logger->debug(
-                sprintf(
-                    'Using mapped shop slug "%s" for sales channel "%s"',
-                    $mappedSlug,
-                    $salesChannelId
-                )
-            );
+            if ($this->debugMode) {
+                $this->logger->debug('Using mapped shop slug for sales channel', [
+                    'component' => 'order.config',
+                    'sales_channel_id' => $salesChannelId,
+                    'shop_slug' => $mappedSlug,
+                ]);
+            }
 
             return $mappedSlug;
         }
 
-        $this->logger->debug(
-            sprintf(
-                'Using default shop slug "%s" for sales channel "%s"',
-                $this->shopSlug,
-                $salesChannelId ?? 'unknown'
-            )
-        );
+        if ($this->debugMode) {
+            $this->logger->debug('Using default shop slug for sales channel', [
+                'component' => 'order.config',
+                'sales_channel_id' => $salesChannelId ?? 'unknown',
+                'shop_slug' => $this->shopSlug,
+            ]);
+        }
 
         return $this->shopSlug;
     }

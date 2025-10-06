@@ -200,10 +200,13 @@ class WebhookController extends AbstractController
                     'mail_recipients' => array_keys($recipients), // Show recipient emails
                 ]);
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->logger->error('Failed to process webhook', [
                 'component' => 'webhook.receiver',
                 'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
                 'data' => $data,
             ]);
 

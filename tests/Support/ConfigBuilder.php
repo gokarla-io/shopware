@@ -103,6 +103,7 @@ class ConfigBuilder
     {
         $this->config['KarlaDelivery.config.depositLineItemType'] = '';
         $this->config['KarlaDelivery.config.salesChannelMapping'] = '';
+        $this->config['KarlaDelivery.config.debugMode'] = false;
 
         return $this;
     }
@@ -114,9 +115,16 @@ class ConfigBuilder
         return $this;
     }
 
-    public function withSalesChannelMapping(string $salesChannelId, string $shopSlug): self
+    public function withSalesChannelMapping(string $mapping): self
     {
-        $this->config['KarlaDelivery.config.salesChannelMapping'] = "{$salesChannelId}:{$shopSlug}";
+        $this->config['KarlaDelivery.config.salesChannelMapping'] = $mapping;
+
+        return $this;
+    }
+
+    public function withDebugMode(bool $enabled): self
+    {
+        $this->config['KarlaDelivery.config.debugMode'] = $enabled;
 
         return $this;
     }

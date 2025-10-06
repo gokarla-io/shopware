@@ -823,10 +823,17 @@ class OrderSubscriberTest extends TestCase
             $orderEntity,
         );
 
-        // Assert: Expect info log about skipped order
+        // Assert: Expect info log about skipped order with structured context
         $this->loggerMock->expects($this->once())
             ->method('info')
-            ->with($this->stringContains('Order "10001" skipped'));
+            ->with(
+                'Order skipped - status not allowed',
+                $this->callback(function ($context) {
+                    return $context['component'] === 'order.sync'
+                        && $context['order_number'] === '10001'
+                        && $context['order_status'] === 'completed';
+                })
+            );
 
         // Expect no HTTP request
         $this->httpClientMock->expects($this->never())
@@ -1334,10 +1341,15 @@ class OrderSubscriberTest extends TestCase
             $orderEntity,
         );
 
-        // Expect warning log about critical configurations missing
+        // Expect warning log about missing configuration with structured context
         $this->loggerMock->expects($this->once())
             ->method('warning')
-            ->with($this->stringContains('Critical configurations missing'));
+            ->with(
+                'Order sync skipped - missing configuration',
+                $this->callback(function ($context) {
+                    return $context['component'] === 'order.sync';
+                })
+            );
 
         // Expect no HTTP request
         $this->httpClientMock->expects($this->never())
@@ -1469,6 +1481,192 @@ class OrderSubscriberTest extends TestCase
 
         $orderSubscriber = new OrderSubscriber(
             $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test order processing with debug mode enabled to cover debug log statements
+     */
+    public function testOnOrderWrittenWithDebugMode()
+    {
+        // Arrange: Setup config with debug mode enabled
+        $systemConfigMock = $this->createMock(SystemConfigService::class);
+        $configMap = ConfigBuilder::create()
+            ->withApiConfig(self::TEST_SHOP_SLUG, self::TEST_API_USER, self::TEST_API_KEY, self::TEST_API_URL)
+            ->withDefaultOrderStatuses()
+            ->withDefaultDeliveryStatuses()
+            ->withDefaultMappings()
+            ->withDebugMode(true)
+            ->withSalesChannelMapping('channel-1:mapped-slug')
+            ->buildMap();
+
+        $systemConfigMock->method('get')->willReturnMap($configMap);
+
+        // Create order with tracking number to trigger all debug logs
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('10001');
+        $orderEntity->method('getAmountTotal')->willReturn(100.00);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(10.00);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+        $orderEntity->method('getShippingTotal')->willReturn(5.0);
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+        $orderEntity->method('getCurrency')->willReturn(null);
+        $orderEntity->method('getSalesChannelId')->willReturn('channel-1');
+
+        // Create line item with product
+        $productLineItem = $this->createMock(OrderLineItemEntity::class);
+        $productLineItem->method('getId')->willReturn(Uuid::randomHex());
+        $productLineItem->method('getReferencedId')->willReturn('PROD-001');
+        $productLineItem->method('getType')->willReturn('product');
+        $productLineItem->method('getLabel')->willReturn('Test Product');
+        $productLineItem->method('getQuantity')->willReturn(1);
+        $productLineItem->method('getUnitPrice')->willReturn(10.00);
+        $productLineItem->method('getTotalPrice')->willReturn(10.00);
+        $product = $this->createMock(ProductEntity::class);
+        $product->method('getCover')->willReturn(null);
+        $productLineItem->method('getProduct')->willReturn($product);
+
+        $lineItems = new OrderLineItemCollection([$productLineItem]);
+        $orderEntity->method('getLineItems')->willReturn($lineItems);
+
+        // Create delivery with tracking number
+        $deliveryPosition = $this->createMock(OrderDeliveryPositionEntity::class);
+        $deliveryPosition->method('getOrderLineItem')->willReturn($productLineItem);
+        $delivery = $this->createMock(OrderDeliveryEntity::class);
+        $delivery->method('getTrackingCodes')->willReturn(['TRACK123']);
+        $delivery->method('getPositions')->willReturn(new OrderDeliveryPositionCollection([$deliveryPosition]));
+        $deliveryState = $this->createMock(StateMachineStateEntity::class);
+        $deliveryState->method('getTechnicalName')->willReturn('shipped');
+        $delivery->method('getStateMachineState')->willReturn($deliveryState);
+        $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([$delivery]));
+
+        // Address and tags
+        $addressMock = $this->createAddressMock();
+        $orderEntity->method('getAddresses')->willReturn(new OrderAddressCollection([$addressMock]));
+        $tag = $this->createMock(TagEntity::class);
+        $tag->method('getName')->willReturn('vip');
+        $orderEntity->method('getTags')->willReturn(new TagCollection([$tag]));
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Expect debug logs to be called (6 total):
+        // 1. Sales channel mapping parsed (constructor)
+        // 2. Delivery found with tracking number
+        // 3. Order segments determined
+        // 4. Using mapped shop slug for sales channel
+        // 5. Preparing API request to Karla
+        // 6. API request to Karla completed
+        $this->loggerMock->expects($this->exactly(6))
+            ->method('debug')
+            ->with(
+                $this->logicalOr(
+                    $this->equalTo('Delivery found with tracking number'),
+                    $this->equalTo('Preparing API request to Karla'),
+                    $this->equalTo('API request to Karla completed'),
+                    $this->equalTo('Order segments determined'),
+                    $this->equalTo('Sales channel mapping parsed'),
+                    $this->equalTo('Using mapped shop slug for sales channel')
+                ),
+                $this->anything()
+            );
+
+        // Mock HTTP response
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+        $responseMock->method('getStatusCode')->willReturn(200);
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->willReturn($responseMock);
+
+        // Act
+        $orderSubscriber = new OrderSubscriber(
+            $systemConfigMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test order processing with debug mode using default shop slug
+     */
+    public function testOnOrderWrittenWithDebugModeDefaultSlug()
+    {
+        // Arrange: Setup config with debug mode enabled but no sales channel mapping
+        $systemConfigMock = $this->createMock(SystemConfigService::class);
+        $configMap = ConfigBuilder::create()
+            ->withApiConfig(self::TEST_SHOP_SLUG, self::TEST_API_USER, self::TEST_API_KEY, self::TEST_API_URL)
+            ->withDefaultOrderStatuses()
+            ->withDefaultDeliveryStatuses()
+            ->withDefaultMappings()
+            ->withDebugMode(true)
+            ->buildMap();
+
+        $systemConfigMock->method('get')->willReturnMap($configMap);
+
+        // Create minimal order without sales channel mapping
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('10001');
+        $orderEntity->method('getAmountTotal')->willReturn(100.00);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(10.00);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+        $orderEntity->method('getShippingTotal')->willReturn(0.0);
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+        $orderEntity->method('getCurrency')->willReturn(null);
+        $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex()); // Unmapped channel
+        $orderEntity->method('getLineItems')->willReturn(new OrderLineItemCollection([]));
+        $orderEntity->method('getAddresses')->willReturn(new OrderAddressCollection([]));
+        $orderEntity->method('getTags')->willReturn(new TagCollection([]));
+        $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Expect debug log for using default shop slug
+        $this->loggerMock->expects($this->atLeastOnce())
+            ->method('debug')
+            ->willReturnCallback(function ($message, $context) {
+                if ($message === 'Using default shop slug for sales channel') {
+                    $this->assertEquals('order.config', $context['component']);
+                    $this->assertEquals('testSlug', $context['shop_slug']);
+                }
+
+                return null;
+            });
+
+        // Mock HTTP response
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+        $responseMock->method('getStatusCode')->willReturn(200);
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->willReturn($responseMock);
+
+        // Act
+        $orderSubscriber = new OrderSubscriber(
+            $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->httpClientMock

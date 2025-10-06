@@ -150,7 +150,7 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
                         'sales_channel_id' => $salesChannelId,
                     ]);
                 }
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $this->logger->error('Failed to create webhook on config change', [
                     'component' => 'webhook.config',
                     'error' => $e->getMessage(),
@@ -216,7 +216,7 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
                         'sales_channel_id' => $salesChannelId,
                     ]);
                 }
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $this->logger->error('Failed to delete webhook on config change', [
                     'component' => 'webhook.config',
                     'error' => $e->getMessage(),

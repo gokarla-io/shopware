@@ -92,7 +92,7 @@ class BusinessEventCollectorSubscriber implements EventSubscriberInterface
                         'event_name' => $eventName,
                     ]);
                 }
-            } catch (\Exception $e) {
+            } catch (\Throwable $e) {
                 $failedCount++;
                 $this->logger->error('Exception while registering Flow Builder event', [
                     'component' => 'flow.builder',

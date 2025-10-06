@@ -108,7 +108,7 @@ class WebhookService
                 'uuid' => $data['uuid'],
                 'secret' => $data['secret'],
             ];
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->logger->error('Failed to create webhook', [
                 'component' => 'webhook.api',
                 'error' => $e->getMessage(),
@@ -174,7 +174,7 @@ class WebhookService
                     'webhook_id' => $webhookId,
                 ]);
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->logger->error('Failed to update webhook', [
                 'component' => 'webhook.api',
                 'error' => $e->getMessage(),
@@ -230,7 +230,7 @@ class WebhookService
                     'webhook_id' => $webhookId,
                 ]);
             }
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->logger->error('Failed to delete webhook', [
                 'component' => 'webhook.api',
                 'error' => $e->getMessage(),
