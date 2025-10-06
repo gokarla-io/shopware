@@ -288,6 +288,8 @@ class OrderSubscriberTest extends TestCase
         $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
         $orderEntity->method('getTags')->willReturn(new TagCollection([]));
         $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getAffiliateCode')->willReturn(null);
+        $orderEntity->method('getCampaignCode')->willReturn(null);
 
         return $orderEntity;
     }
@@ -1340,6 +1342,137 @@ class OrderSubscriberTest extends TestCase
         // Expect no HTTP request
         $this->httpClientMock->expects($this->never())
             ->method('request');
+
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test order with affiliate code only
+     */
+    public function testOnOrderWrittenWithAffiliateCode()
+    {
+        // Create order mock with affiliate code (need to create a fresh mock to override)
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('10001');
+        $orderEntity->method('getAmountTotal')->willReturn(100.00);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(10.00);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+        $orderEntity->method('getLineItems')->willReturn(new OrderLineItemCollection([]));
+        $orderEntity->method('getAddresses')->willReturn(new OrderAddressCollection([]));
+        $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
+        $orderEntity->method('getTags')->willReturn(new TagCollection([]));
+        $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+        $orderEntity->method('getShippingTotal')->willReturn(0.0);
+        $orderEntity->method('getCurrency')->willReturn(null);
+
+        // Attribution codes
+        $orderEntity->method('getAffiliateCode')->willReturn('karla');
+        $orderEntity->method('getCampaignCode')->willReturn(null);
+
+        $event = $this->mockOrderEvent(
+            $this->createSalesChannelApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Mock HTTP response
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+
+                    // Verify order_analytics exists with affiliate_code
+                    return isset($body['order_analytics'])
+                        && isset($body['order_analytics']['affiliate_code'])
+                        && $body['order_analytics']['affiliate_code'] === 'karla'
+                        && ! isset($body['order_analytics']['campaign_code']);
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test order with both affiliate and campaign codes
+     */
+    public function testOnOrderWrittenWithAttributionCodes()
+    {
+        // Create order mock with both attribution codes (need to create a fresh mock to override)
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('10001');
+        $orderEntity->method('getAmountTotal')->willReturn(100.00);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(10.00);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+        $orderEntity->method('getLineItems')->willReturn(new OrderLineItemCollection([]));
+        $orderEntity->method('getAddresses')->willReturn(new OrderAddressCollection([]));
+        $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection([]));
+        $orderEntity->method('getTags')->willReturn(new TagCollection([]));
+        $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+        $orderEntity->method('getShippingTotal')->willReturn(0.0);
+        $orderEntity->method('getCurrency')->willReturn(null);
+
+        // Attribution codes
+        $orderEntity->method('getAffiliateCode')->willReturn('karla');
+        $orderEntity->method('getCampaignCode')->willReturn('summer2024');
+
+        $event = $this->mockOrderEvent(
+            $this->createSalesChannelApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Mock HTTP response
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+
+                    // Verify order_analytics exists with both codes
+                    return isset($body['order_analytics'])
+                        && isset($body['order_analytics']['affiliate_code'])
+                        && $body['order_analytics']['affiliate_code'] === 'karla'
+                        && isset($body['order_analytics']['campaign_code'])
+                        && $body['order_analytics']['campaign_code'] === 'summer2024';
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
 
         $orderSubscriber->onOrderWritten($event);
     }

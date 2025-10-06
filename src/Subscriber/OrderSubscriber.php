@@ -301,6 +301,22 @@ class OrderSubscriber implements EventSubscriberInterface
         // Extract tags from the order and format them as segments
         $segments = $this->extractOrderTagsAsSegments($order);
 
+        // Extract attribution data (affiliate and campaign codes)
+        $affiliateCode = $order->getAffiliateCode();
+        $campaignCode = $order->getCampaignCode();
+
+        // Build order analytics object if attribution data exists
+        $orderAnalytics = null;
+        if ($affiliateCode || $campaignCode) {
+            $orderAnalytics = [];
+            if ($affiliateCode) {
+                $orderAnalytics['affiliate_code'] = $affiliateCode;
+            }
+            if ($campaignCode) {
+                $orderAnalytics['campaign_code'] = $campaignCode;
+            }
+        }
+
         $orderUpsertPayload = [
          'id' => $orderNumber,
          'id_type' => 'order_number',
@@ -322,6 +338,11 @@ class OrderSubscriber implements EventSubscriberInterface
             ],
          'trackings' => [],
         ];
+
+        // Add order_analytics if attribution data exists
+        if ($orderAnalytics) {
+            $orderUpsertPayload['order_analytics'] = $orderAnalytics;
+        }
         $nDeliveries = 0;
         foreach ($deliveries as $delivery) {
             $deliveryStatus = $delivery->getStateMachineState()->getTechnicalName();
