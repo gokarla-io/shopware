@@ -501,8 +501,10 @@ These warnings don't affect:
 
 **Important Shopware Concepts:**
 
-- `OrderLineItem::getId()` returns the line item instance UUID (use as `external_product_id`)
-- `OrderLineItem::getReferencedId()` returns the product/variant UUID (use as `sku`)
+- `OrderLineItem::getId()` returns the line item instance UUID
+- `OrderLineItem::getReferencedId()` returns the product/variant UUID (use as `sku` and `variant_id`)
+- For products with variants: `product_id` is the parent product ID, `variant_id` is the specific variant ID
+- For standalone products (no variants): both `product_id` and `variant_id` are the same (the product's own ID)
 - Use WebFetch on these docs when you need detailed entity/method information
 
 ### Coding Standards

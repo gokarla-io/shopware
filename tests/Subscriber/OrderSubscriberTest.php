@@ -351,7 +351,7 @@ class OrderSubscriberTest extends TestCase
                 if (! empty($body['order']['products'])) {
                     $product = $body['order']['products'][0];
 
-                    return isset($product['external_product_id'])
+                    return isset($product['product_id'])
                         && isset($product['sku'])
                         && isset($product['title'])
                         && isset($product['quantity'])
@@ -441,7 +441,7 @@ class OrderSubscriberTest extends TestCase
                     if (isset($tracking['products']) && ! empty($tracking['products'])) {
                         $product = $tracking['products'][0];
 
-                        return isset($product['external_product_id'])
+                        return isset($product['product_id'])
                             && isset($product['sku'])
                             && isset($product['title'])
                             && isset($product['quantity'])
@@ -896,10 +896,58 @@ class OrderSubscriberTest extends TestCase
             ->method('request')
             ->willThrowException(new \Exception('Network error'));
 
-        // Expect error log
-        $this->loggerMock->expects($this->once())
+        // Expect TWO error logs:
+        // 1. Specific "Failed to send request to Karla API" in sendRequestToKarlaApi
+        // 2. General "Unexpected error during order sync" in onOrderWritten
+        $this->loggerMock->expects($this->exactly(2))
             ->method('error')
-            ->with($this->stringContains('Unexpected error'));
+            ->willReturnCallback(function ($message, $context) {
+                // Accept both error messages
+                return null;
+            });
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test handling of API validation errors (422)
+     */
+    public function testApiValidationErrorHandling()
+    {
+        $orderEntity = $this->createOrderEntityMock();
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Mock HTTP response with 422 status
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getStatusCode')->willReturn(422);
+        $responseMock->method('getContent')
+            ->with(false) // false = don't throw on error status
+            ->willReturn('{"error":"Validation failed","details":["product_id is required"]}');
+
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->willReturn($responseMock);
+
+        // Expect TWO error logs:
+        // 1. The specific API error log
+        // 2. The general "Unexpected error during order sync" log
+        $this->loggerMock->expects($this->exactly(2))
+            ->method('error')
+            ->willReturnCallback(function ($message, $context) {
+                // First call: specific API error
+                // Second call: general error wrapper
+                return null;
+            });
 
         $orderSubscriber = new OrderSubscriber(
             $this->systemConfigServiceMock,
@@ -944,7 +992,7 @@ class OrderSubscriberTest extends TestCase
 
                     return isset($tracking['products'])
                         && ! empty($tracking['products'])
-                        && isset($tracking['products'][0]['external_product_id'])
+                        && isset($tracking['products'][0]['product_id'])
                         && isset($tracking['products'][0]['sku']);
                 })
             )
@@ -1728,6 +1776,260 @@ class OrderSubscriberTest extends TestCase
                 })
             )
             ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    public function testOnOrderWrittenWithVariantProducts(): void
+    {
+        // Setup system config
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.shopSlug', null, 'test-shop'],
+            ['KarlaDelivery.config.apiUrl', null, 'https://api.test.com'],
+            ['KarlaDelivery.config.apiUsername', null, 'user'],
+            ['KarlaDelivery.config.apiKey', null, 'key'],
+            ['KarlaDelivery.config.requestTimeout', null, 10.0],
+            ['KarlaDelivery.config.orderOpen', null, false],
+            ['KarlaDelivery.config.orderInProgress', null, true],
+            ['KarlaDelivery.config.orderCompleted', null, false],
+            ['KarlaDelivery.config.orderCancelled', null, false],
+            ['KarlaDelivery.config.deliveryOpen', null, false],
+            ['KarlaDelivery.config.deliveryShipped', null, false],
+            ['KarlaDelivery.config.deliveryShippedPartially', null, false],
+            ['KarlaDelivery.config.deliveryReturned', null, false],
+            ['KarlaDelivery.config.deliveryReturnedPartially', null, false],
+            ['KarlaDelivery.config.deliveryCancelled', null, false],
+            ['KarlaDelivery.config.depositLineItemType', null, ''],
+            ['KarlaDelivery.config.salesChannelMapping', null, ''],
+            ['KarlaDelivery.config.debugMode', null, false],
+        ]);
+
+        // Create mock for variant product with parent ID in payload
+        $lineItemMock = $this->createMock(OrderLineItemEntity::class);
+        $lineItemMock->method('getType')->willReturn('product');
+        $lineItemMock->method('getId')->willReturn('line-item-id');
+        $lineItemMock->method('getReferencedId')->willReturn('variant-id-123');
+        $lineItemMock->method('getLabel')->willReturn('Variant Product - Size L');
+        $lineItemMock->method('getQuantity')->willReturn(2);
+        $lineItemMock->method('getUnitPrice')->willReturn(29.99);
+        $lineItemMock->method('getTotalPrice')->willReturn(59.98);
+        // Payload contains parent ID for variant products
+        $lineItemMock->method('getPayload')->willReturn(['parentId' => 'parent-product-id-456']);
+
+        $productMock = $this->createMock(ProductEntity::class);
+        $productMock->method('getProductNumber')->willReturn('VARIANT-SKU-001');
+        $lineItemMock->method('getProduct')->willReturn($productMock);
+
+        $lineItemCollection = new OrderLineItemCollection([$lineItemMock]);
+
+        // Build order entity from scratch since we can't override mocks
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('ORD-VARIANT-001');
+        $orderEntity->method('getAmountTotal')->willReturn(59.98);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(59.98);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+
+        $orderEntity->method('getLineItems')->willReturn($lineItemCollection);
+        $orderEntity->method('getDeliveries')->willReturn(new OrderDeliveryCollection());
+        $orderEntity->method('getTags')->willReturn(new TagCollection());
+        $orderEntity->method('getAddresses')->willReturn(new OrderAddressCollection());
+        $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getAffiliateCode')->willReturn(null);
+        $orderEntity->method('getCampaignCode')->willReturn(null);
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+        $orderEntity->method('getCurrency')->willReturn(null);
+
+        $searchResultMock = $this->createMock(EntitySearchResult::class);
+        $searchResultMock->method('first')->willReturn($orderEntity);
+        $searchResultMock->method('getIterator')->willReturn(new \ArrayIterator([$orderEntity]));
+        $this->orderRepositoryMock->method('search')->willReturn($searchResultMock);
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getStatusCode')->willReturn(200);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: Verify variant product has correct product_id (parent) and variant_id
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->anything(),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+                    $products = $body['order']['products'] ?? [];
+
+                    // Should have 1 product
+                    $this->assertCount(1, $products);
+
+                    $product = $products[0];
+                    // product_id should be parent ID from payload
+                    $this->assertEquals('parent-product-id-456', $product['product_id']);
+                    // variant_id should be the variant ID
+                    $this->assertEquals('variant-id-123', $product['variant_id']);
+                    // SKU should be product number
+                    $this->assertEquals('VARIANT-SKU-001', $product['sku']);
+
+                    return true;
+                })
+            )
+            ->willReturn($responseMock);
+
+        $event = $this->mockOrderEvent(
+            $this->createSalesChannelApiSourceContextMock(),
+            $orderEntity
+        );
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    public function testOnOrderWrittenWithVariantProductsInDelivery(): void
+    {
+        // Setup system config
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.shopSlug', null, 'test-shop'],
+            ['KarlaDelivery.config.apiUrl', null, 'https://api.test.com'],
+            ['KarlaDelivery.config.apiUsername', null, 'user'],
+            ['KarlaDelivery.config.apiKey', null, 'key'],
+            ['KarlaDelivery.config.requestTimeout', null, 10.0],
+            ['KarlaDelivery.config.orderOpen', null, false],
+            ['KarlaDelivery.config.orderInProgress', null, true],
+            ['KarlaDelivery.config.orderCompleted', null, false],
+            ['KarlaDelivery.config.orderCancelled', null, false],
+            ['KarlaDelivery.config.deliveryOpen', null, true],
+            ['KarlaDelivery.config.deliveryShipped', null, true],
+            ['KarlaDelivery.config.deliveryShippedPartially', null, false],
+            ['KarlaDelivery.config.deliveryReturned', null, false],
+            ['KarlaDelivery.config.deliveryReturnedPartially', null, false],
+            ['KarlaDelivery.config.deliveryCancelled', null, false],
+            ['KarlaDelivery.config.depositLineItemType', null, ''],
+            ['KarlaDelivery.config.salesChannelMapping', null, ''],
+            ['KarlaDelivery.config.debugMode', null, false],
+        ]);
+
+        // Create mock for variant product with parent ID in payload
+        $lineItemMock = $this->createMock(OrderLineItemEntity::class);
+        $lineItemMock->method('getType')->willReturn('product');
+        $lineItemMock->method('getId')->willReturn('line-item-id');
+        $lineItemMock->method('getReferencedId')->willReturn('variant-id-789');
+        $lineItemMock->method('getLabel')->willReturn('Variant Product - Size M');
+        $lineItemMock->method('getQuantity')->willReturn(1);
+        $lineItemMock->method('getUnitPrice')->willReturn(49.99);
+        $lineItemMock->method('getTotalPrice')->willReturn(49.99);
+        // Payload contains parent ID for variant products
+        $lineItemMock->method('getPayload')->willReturn(['parentId' => 'parent-product-id-789']);
+
+        $productMock = $this->createMock(ProductEntity::class);
+        $productMock->method('getProductNumber')->willReturn('VARIANT-SKU-789');
+        $lineItemMock->method('getProduct')->willReturn($productMock);
+
+        // Create delivery position with the variant line item
+        $deliveryPositionMock = $this->createMock(OrderDeliveryPositionEntity::class);
+        $deliveryPositionMock->method('getOrderLineItem')->willReturn($lineItemMock);
+
+        $deliveryPositionCollection = new OrderDeliveryPositionCollection([$deliveryPositionMock]);
+
+        // Create delivery with tracking codes and positions
+        $deliveryMock = $this->createMock(OrderDeliveryEntity::class);
+        $deliveryMock->method('getTrackingCodes')->willReturn(['TRACK123']);
+        $deliveryMock->method('getPositions')->willReturn($deliveryPositionCollection);
+        $deliveryMock->method('getStateMachineState')->willReturn($this->createMockStateMachineState('shipped'));
+
+        $shippingMethodMock = $this->createMock(ShippingMethodEntity::class);
+        $shippingMethodMock->method('getName')->willReturn('DHL');
+        $deliveryMock->method('getShippingMethod')->willReturn($shippingMethodMock);
+
+        $deliveryCollection = new OrderDeliveryCollection([$deliveryMock]);
+
+        // Build order entity with deliveries
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('ORD-DELIVERY-001');
+        $orderEntity->method('getAmountTotal')->willReturn(49.99);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(49.99);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+
+        $orderEntity->method('getLineItems')->willReturn(new OrderLineItemCollection());
+        $orderEntity->method('getDeliveries')->willReturn($deliveryCollection);
+        $orderEntity->method('getTags')->willReturn(new TagCollection());
+        $orderEntity->method('getAddresses')->willReturn(new OrderAddressCollection());
+        $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getAffiliateCode')->willReturn(null);
+        $orderEntity->method('getCampaignCode')->willReturn(null);
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+        $orderEntity->method('getCurrency')->willReturn(null);
+
+        $searchResultMock = $this->createMock(EntitySearchResult::class);
+        $searchResultMock->method('first')->willReturn($orderEntity);
+        $searchResultMock->method('getIterator')->willReturn(new \ArrayIterator([$orderEntity]));
+        $this->orderRepositoryMock->method('search')->willReturn($searchResultMock);
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getStatusCode')->willReturn(200);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: Verify variant product in delivery has correct product_id (parent) and variant_id
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->anything(),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+                    $trackings = $body['trackings'] ?? [];
+
+                    // Should have 1 tracking
+                    $this->assertCount(1, $trackings);
+
+                    $tracking = $trackings[0];
+                    $products = $tracking['products'] ?? [];
+
+                    // Should have 1 product
+                    $this->assertCount(1, $products);
+
+                    $product = $products[0];
+                    // product_id should be parent ID from payload
+                    $this->assertEquals('parent-product-id-789', $product['product_id']);
+                    // variant_id should be the variant ID
+                    $this->assertEquals('variant-id-789', $product['variant_id']);
+                    // SKU should be product number
+                    $this->assertEquals('VARIANT-SKU-789', $product['sku']);
+
+                    return true;
+                })
+            )
+            ->willReturn($responseMock);
+
+        $event = $this->mockOrderEvent(
+            $this->createSalesChannelApiSourceContextMock(),
+            $orderEntity
+        );
 
         $orderSubscriber = new OrderSubscriber(
             $this->systemConfigServiceMock,

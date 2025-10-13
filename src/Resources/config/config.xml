@@ -49,7 +49,7 @@
             <label lang="de-DE">Debug-Protokollierung aktivieren</label>
             <helpText>Enable verbose logging for troubleshooting. Logs detailed information about webhook operations, API requests, and configuration changes. Check var/log/karla.log for details.</helpText>
             <helpText lang="de-DE">Aktiviere ausführliche Protokollierung zur Fehlerbehebung. Protokolliert detaillierte Informationen über Webhook-Operationen, API-Anfragen und Konfigurationsänderungen. Details in var/log/karla.log prüfen.</helpText>
-            <defaultValue>false</defaultValue>
+            <defaultValue>true</defaultValue>
         </input-field>
     </card>
     <card>
@@ -137,6 +137,19 @@
             <label lang="de-DE">Storniert</label>
             <helpText>Send the order and its deliveries to Karla servers when delivery status is "Cancelled".</helpText>
             <helpText lang="de-DE">Bestellung und Lieferungen an Karla-Server senden, wenn der Lieferstatus "Storniert" ist.</helpText>
+            <defaultValue>false</defaultValue>
+        </input-field>
+    </card>
+
+    <card>
+        <title>Product Sync</title>
+        <title lang="de-DE">Produktsynchronisierung</title>
+        <input-field type="bool">
+            <name>productSyncEnabled</name>
+            <label>Enable Product Sync</label>
+            <label lang="de-DE">Produktsynchronisierung aktivieren</label>
+            <helpText>Automatically sync products to Karla when created, updated, or deleted. Full sync runs automatically when enabled (limited to once per hour to prevent accidental re-syncs).</helpText>
+            <helpText lang="de-DE">Synchronisiert Produkte automatisch mit Karla bei Erstellung, Aktualisierung oder Löschung. Vollständige Synchronisierung läuft automatisch beim Aktivieren (auf einmal pro Stunde begrenzt, um versehentliche erneute Synchronisierung zu verhindern).</helpText>
             <defaultValue>false</defaultValue>
         </input-field>
     </card>

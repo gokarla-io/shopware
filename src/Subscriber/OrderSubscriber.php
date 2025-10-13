@@ -431,21 +431,62 @@ class OrderSubscriber implements EventSubscriberInterface
                 'payload' => $orderData,
             ]);
         }
-        $response = $this->httpClient->request($method, $url, [
-            'headers' => $headers,
-            'body' => $jsonPayload,
-            'timeout' => $this->requestTimeout,
-        ]);
-        $content = $response->getContent();
-        $statusCode = $response->getStatusCode();
-        if ($this->debugMode) {
-            $this->logger->debug('API request to Karla completed', [
+
+        try {
+            $response = $this->httpClient->request($method, $url, [
+                'headers' => $headers,
+                'body' => $jsonPayload,
+                'timeout' => $this->requestTimeout,
+            ]);
+
+            // Get status code (can throw on network errors)
+            $statusCode = $response->getStatusCode();
+
+            // Get content - use false parameter to prevent throwing on HTTP error status codes
+            $content = $response->getContent(false);
+
+            // Log the response
+            if ($this->debugMode) {
+                $this->logger->debug('API request to Karla completed', [
+                    'component' => 'order.api',
+                    'method' => $method,
+                    'url' => $url,
+                    'status_code' => $statusCode,
+                    'response' => $content,
+                ]);
+            }
+
+            // If not successful, log error details and throw
+            if ($statusCode >= 400) {
+                $this->logger->error('Karla API returned error status', [
+                    'component' => 'order.api',
+                    'method' => $method,
+                    'url' => $url,
+                    'status_code' => $statusCode,
+                    'response_body' => $content,
+                    'request_payload' => $orderData,
+                ]);
+
+                throw new \RuntimeException(
+                    sprintf('Karla API returned %d error: %s', $statusCode, $content)
+                );
+            }
+        } catch (\RuntimeException $e) {
+            // Re-throw RuntimeException (HTTP error status codes we handled above)
+            throw $e;
+        } catch (\Throwable $e) {
+            // Catch any other exception (network errors, timeouts, transport errors)
+            $this->logger->error('Failed to send request to Karla API', [
                 'component' => 'order.api',
                 'method' => $method,
                 'url' => $url,
-                'status_code' => $statusCode,
-                'response' => $content,
+                'error' => $e->getMessage(),
+                'error_class' => get_class($e),
+                'request_payload' => $orderData,
             ]);
+
+            // Re-throw to be caught by the outer exception handler in onOrderWritten
+            throw $e;
         }
     }
 
@@ -468,9 +509,26 @@ class OrderSubscriber implements EventSubscriberInterface
                 $product = $lineItem->getProduct();
                 $cover = $product instanceof ProductEntity ? $product->getCover() : null;
                 $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
+
+                // Determine product_id and variant_id
+                // For Shopware: parent ID is the container, product ID is the variant
+                $productId = $lineItem->getReferencedId(); // The actual product/variant ID
+
+                // Try to get parent ID from payload first, then from product entity
+                $parentId = null;
+                if (is_array($payload) && isset($payload['parentId'])) {
+                    $parentId = $payload['parentId'];
+                } elseif ($product instanceof ProductEntity) {
+                    $parentId = $product->getParentId();
+                }
+
+                $karlaProductId = $parentId ?? $productId; // Use parent if exists, else self
+                $karlaVariantId = $productId; // The actual variant/product ID
+
                 $products[] = [
-                 'external_product_id' => $lineItem->getId(),
-                 'sku' => $lineItem->getReferencedId(),
+                 'product_id' => $karlaProductId,
+                 'variant_id' => $karlaVariantId,
+                 'sku' => $product instanceof ProductEntity ? $product->getProductNumber() : $lineItem->getReferencedId(),
                  'title' => $lineItem->getLabel(),
                  'quantity' => $lineItem->getQuantity(),
                  'price' => $lineItem->getUnitPrice(),
@@ -509,12 +567,30 @@ class OrderSubscriber implements EventSubscriberInterface
         foreach ($deliveryPositions as $deliveryPosition) {
             $lineItem = $deliveryPosition->getOrderLineItem();
             if ($lineItem->getType() === 'product') {
+                $payload = $lineItem->getPayload();
                 $product = $lineItem->getProduct();
                 $cover = $product instanceof ProductEntity ? $product->getCover() : null;
                 $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
+
+                // Determine product_id and variant_id
+                // For Shopware: parent ID is the container, product ID is the variant
+                $productId = $lineItem->getReferencedId(); // The actual product/variant ID
+
+                // Try to get parent ID from payload first, then from product entity
+                $parentId = null;
+                if (is_array($payload) && isset($payload['parentId'])) {
+                    $parentId = $payload['parentId'];
+                } elseif ($product instanceof ProductEntity) {
+                    $parentId = $product->getParentId();
+                }
+
+                $karlaProductId = $parentId ?? $productId; // Use parent if exists, else self
+                $karlaVariantId = $productId; // The actual variant/product ID
+
                 $products[] = [
-                 'external_product_id' => $lineItem->getId(),
-                 'sku' => $lineItem->getReferencedId(),
+                 'product_id' => $karlaProductId,
+                 'variant_id' => $karlaVariantId,
+                 'sku' => $product instanceof ProductEntity ? $product->getProductNumber() : $lineItem->getReferencedId(),
                  'title' => $lineItem->getLabel(),
                  'quantity' => $lineItem->getQuantity(),
                  'price' => $lineItem->getUnitPrice(),

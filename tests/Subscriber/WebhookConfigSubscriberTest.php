@@ -10,6 +10,7 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\System\SystemConfig\Event\SystemConfigChangedEvent;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * @internal
@@ -27,6 +28,9 @@ final class WebhookConfigSubscriberTest extends TestCase
     /** @var LoggerInterface&\PHPUnit\Framework\MockObject\MockObject */
     private LoggerInterface $loggerMock;
 
+    /** @var MessageBusInterface&\PHPUnit\Framework\MockObject\MockObject */
+    private MessageBusInterface $messageBusMock;
+
     private WebhookConfigSubscriber $subscriber;
 
     // Test constants
@@ -40,11 +44,13 @@ final class WebhookConfigSubscriberTest extends TestCase
         $this->webhookServiceMock = $this->createMock(WebhookService::class);
         $this->systemConfigServiceMock = $this->createMock(SystemConfigService::class);
         $this->loggerMock = $this->createMock(LoggerInterface::class);
+        $this->messageBusMock = $this->createMock(MessageBusInterface::class);
 
         $this->subscriber = new WebhookConfigSubscriber(
             $this->webhookServiceMock,
             $this->systemConfigServiceMock,
             $this->loggerMock,
+            $this->messageBusMock,
             self::TEST_BASE_URL,
         );
     }
@@ -435,5 +441,139 @@ final class WebhookConfigSubscriberTest extends TestCase
         $this->subscriber->onSystemConfigChanged($event);
 
         // Assert: Expectations verified by mocks
+    }
+
+    /**
+     * @covers ::onSystemConfigChanged
+     */
+    public function testHandlesProductSyncEnabledFirstTime(): void
+    {
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.productSyncLastEnabled', null, null], // Never enabled before
+        ]);
+
+        $this->systemConfigServiceMock->expects($this->exactly(2))
+            ->method('set')
+            ->willReturnCallback(function ($key, $value) {
+                if ($key === 'KarlaDelivery.config.productSyncLastEnabled') {
+                    $this->assertIsInt($value);
+                } elseif ($key === 'KarlaDelivery.config.productSyncStatus') {
+                    $this->assertEquals('running', $value);
+                }
+
+                return null;
+            });
+
+        $this->messageBusMock->expects($this->once())
+            ->method('dispatch')
+            ->with($this->callback(function ($message) {
+                return $message instanceof \Karla\Delivery\Message\SyncAllProductsMessage
+                    && $message->getOffset() === 0
+                    && $message->getLimit() === 50;
+            }))
+            ->willReturnCallback(function ($message) {
+                return new \Symfony\Component\Messenger\Envelope($message);
+            });
+
+        $this->loggerMock->expects($this->once())
+            ->method('info')
+            ->with('Product sync enabled - triggering full sync', $this->callback(function ($context) {
+                return $context['component'] === 'product.config'
+                    && $context['last_enabled'] === 'never';
+            }));
+
+        $event = new SystemConfigChangedEvent(
+            'KarlaDelivery.config.productSyncEnabled',
+            true,
+            null
+        );
+
+        $this->subscriber->onSystemConfigChanged($event);
+    }
+
+    /**
+     * @covers ::onSystemConfigChanged
+     */
+    public function testHandlesProductSyncEnabledRecentlyEnabledSkipsSync(): void
+    {
+        $recentTime = time() - 120; // 2 minutes ago (within 5-minute cooldown)
+
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.productSyncLastEnabled', null, $recentTime],
+        ]);
+
+        // Should not set config or dispatch message
+        $this->systemConfigServiceMock->expects($this->never())->method('set');
+        $this->messageBusMock->expects($this->never())->method('dispatch');
+
+        $this->loggerMock->expects($this->once())
+            ->method('info')
+            ->with('Product sync enabled - skipping full sync (recently synced)', $this->callback(function ($context) {
+                return $context['component'] === 'product.config'
+                    && isset($context['last_enabled'])
+                    && isset($context['seconds_ago'])
+                    && isset($context['cooldown_remaining']);
+            }));
+
+        $event = new SystemConfigChangedEvent(
+            'KarlaDelivery.config.productSyncEnabled',
+            true,
+            null
+        );
+
+        $this->subscriber->onSystemConfigChanged($event);
+    }
+
+    /**
+     * @covers ::onSystemConfigChanged
+     */
+    public function testHandlesProductSyncEnabledAfterCooldown(): void
+    {
+        $oldTime = time() - 600; // 10 minutes ago (past 5-minute cooldown)
+
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.productSyncLastEnabled', null, $oldTime],
+        ]);
+
+        $this->systemConfigServiceMock->expects($this->exactly(2))
+            ->method('set');
+
+        $this->messageBusMock->expects($this->once())
+            ->method('dispatch')
+            ->willReturnCallback(function ($message) {
+                return new \Symfony\Component\Messenger\Envelope($message);
+            });
+
+        $event = new SystemConfigChangedEvent(
+            'KarlaDelivery.config.productSyncEnabled',
+            true,
+            null
+        );
+
+        $this->subscriber->onSystemConfigChanged($event);
+    }
+
+    /**
+     * @covers ::onSystemConfigChanged
+     */
+    public function testHandlesProductSyncDisabled(): void
+    {
+        $this->loggerMock->expects($this->once())
+            ->method('info')
+            ->with('Product sync disabled', [
+                'component' => 'product.config',
+            ]);
+
+        // Should not set config or dispatch
+        $this->systemConfigServiceMock->expects($this->never())->method('set');
+        $this->messageBusMock->expects($this->never())->method('dispatch');
+
+        $event = new SystemConfigChangedEvent(
+            'KarlaDelivery.config.productSyncEnabled',
+            false,
+            null
+        );
+
+        $this->subscriber->onSystemConfigChanged($event);
     }
 }

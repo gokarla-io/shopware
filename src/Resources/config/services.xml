@@ -38,6 +38,7 @@
             <argument type="service" id="Karla\Delivery\Service\WebhookService"/>
             <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
             <argument type="service" id="monolog.logger.karla_delivery"/>
+            <argument type="service" id="messenger.default_bus"/>
             <argument>%env(APP_URL)%</argument>
             <tag name="kernel.event_subscriber"/>
         </service>
@@ -53,6 +54,31 @@
         <service id="Karla\Delivery\Subscriber\KarlaDataStorer">
             <argument type="service" id="monolog.logger.karla_delivery"/>
             <tag name="flow.storer"/>
+        </service>
+
+        <!-- Product Sync Services -->
+        <service id="Karla\Delivery\Service\ProductSyncService">
+            <argument type="service" id="product.repository"/>
+            <argument type="service" id="Symfony\Contracts\HttpClient\HttpClientInterface"/>
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+            <argument type="service" id="Doctrine\DBAL\Connection"/>
+        </service>
+
+        <service id="Karla\Delivery\Subscriber\ProductSubscriber">
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+            <argument type="service" id="product.repository"/>
+            <argument type="service" id="Karla\Delivery\Service\ProductSyncService"/>
+            <tag name="kernel.event_subscriber"/>
+        </service>
+
+        <service id="Karla\Delivery\MessageHandler\SyncAllProductsMessageHandler">
+            <argument type="service" id="Karla\Delivery\Service\ProductSyncService"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+            <argument type="service" id="messenger.default_bus"/>
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <tag name="messenger.message_handler"/>
         </service>
     </services>
 </container>

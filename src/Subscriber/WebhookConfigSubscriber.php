@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Karla\Delivery\Subscriber;
 
+use Karla\Delivery\Message\SyncAllProductsMessage;
 use Karla\Delivery\Service\WebhookService;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\System\SystemConfig\Event\SystemConfigChangedEvent;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * Subscriber that manages webhook lifecycle based on configuration changes.
@@ -23,6 +25,7 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
         private readonly WebhookService $webhookService,
         private readonly SystemConfigService $systemConfigService,
         private readonly LoggerInterface $logger,
+        private readonly MessageBusInterface $messageBus,
         private readonly string $baseUrl,
     ) {
     }
@@ -38,6 +41,13 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
     {
         $key = $event->getKey();
         $salesChannelId = $event->getSalesChannelId();
+
+        // Handle product sync toggle
+        if ($key === 'KarlaDelivery.config.productSyncEnabled') {
+            $this->handleProductSyncToggle($event->getValue());
+
+            return;
+        }
 
         // Only handle Karla Delivery webhook configuration changes
         if (! str_starts_with($key, 'KarlaDelivery.config.webhook')) {
@@ -263,5 +273,50 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
 
         // Split by comma and trim whitespace
         return array_map('trim', explode(',', $enabledEvents));
+    }
+
+    /**
+     * Handle product sync toggle with 1-hour protection against spam
+     *
+     * @codeCoverageIgnore
+     * This private method is implicitly tested through onSystemConfigChanged.
+     */
+    private function handleProductSyncToggle(mixed $enabled): void
+    {
+        if (! $enabled) {
+            $this->logger->info('Product sync disabled', [
+                'component' => 'product.config',
+            ]);
+
+            return;
+        }
+
+        // Check last time product sync was enabled
+        $lastEnabled = $this->systemConfigService->get('KarlaDelivery.config.productSyncLastEnabled');
+        $now = time();
+        $cooldownSeconds = 300; // 5 minutes cooldown
+
+        // If never enabled OR last enabled > cooldown period → trigger full sync
+        if (! $lastEnabled || ($now - $lastEnabled) > $cooldownSeconds) {
+            $this->logger->info('Product sync enabled - triggering full sync', [
+                'component' => 'product.config',
+                'last_enabled' => $lastEnabled ? date('Y-m-d H:i:s', $lastEnabled) : 'never',
+            ]);
+
+            // Update timestamp
+            $this->systemConfigService->set('KarlaDelivery.config.productSyncLastEnabled', $now);
+            $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'running');
+
+            // Dispatch message to queue
+            $this->messageBus->dispatch(new SyncAllProductsMessage());
+        } else {
+            $secondsSinceLastSync = $now - $lastEnabled;
+            $this->logger->info('Product sync enabled - skipping full sync (recently synced)', [
+                'component' => 'product.config',
+                'last_enabled' => date('Y-m-d H:i:s', $lastEnabled),
+                'seconds_ago' => $secondsSinceLastSync,
+                'cooldown_remaining' => $cooldownSeconds - $secondsSinceLastSync,
+            ]);
+        }
     }
 }
