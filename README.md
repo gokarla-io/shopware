@@ -4,6 +4,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.3-blue)](https://www.php.net/)
 [![Shopware](https://img.shields.io/badge/shopware-6.x-blue)](https://www.shopware.com/)
+[![Packagist](https://img.shields.io/packagist/v/gokarla/shopware)](https://packagist.org/packages/gokarla/shopware)
 
 Enhance your post-purchase customer experience in [Shopware](https://www.shopware.com/en/) with [GoKarla](https://gokarla.io) - automated order tracking and delivery updates for your customers.
 
