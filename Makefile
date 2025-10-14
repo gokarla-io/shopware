@@ -34,10 +34,23 @@ clean: init ## cleans up all containers and other temporary files
 	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_COMPOSE_FILE) down
 
 build: init ## build files for distribution
+	@echo "Building distribution package..."
+	@# Get version from latest git tag, fallback to "dev-main" if no tags
+	$(eval VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev-main"))
+	@echo "Version: $(VERSION)"
+	@# Create build directory
 	mkdir -p dist/KarlaDelivery/src
+	@# Copy source files
 	cp -r src dist/KarlaDelivery/
-	cp composer.json dist/KarlaDelivery/composer.json
+	@# Copy composer.json and inject version
+	@if [ "$(VERSION)" != "dev-main" ]; then \
+		jq '.version = "$(VERSION:v%=%)"' composer.json > dist/KarlaDelivery/composer.json; \
+	else \
+		cp composer.json dist/KarlaDelivery/composer.json; \
+	fi
+	@# Create ZIP
 	cd dist && zip -r KarlaDelivery.zip KarlaDelivery
+	@echo "✓ Build complete: dist/KarlaDelivery.zip (version $(VERSION))"
 
 lint: init ## check code style with PHP-CS-Fixer
 	vendor/bin/php-cs-fixer fix --dry-run --diff
