@@ -1,7 +1,7 @@
 # Karla Shopware Extension
 
 [![ci](https://github.com/gokarla-io/shopware/actions/workflows/ci.yaml/badge.svg)](https://github.com/gokarla-io/shopware/actions/workflows/ci.yaml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![PHP Version](https://img.shields.io/badge/php-%3E%3D8.3-blue)](https://www.php.net/)
 [![Shopware](https://img.shields.io/badge/shopware-6.x-blue)](https://www.shopware.com/)
 
@@ -88,7 +88,7 @@ After installation, configure the extension:
 
 ## Contributing
 
-We welcome contributions! This is an open-source project under the Apache 2.0 License.
+We welcome contributions! This is an open-source project under the Apache-2.0 License.
 
 **Quality Standards:**
 
@@ -214,4 +214,4 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache-2.0 License - see the [LICENSE](LICENSE) file for details.

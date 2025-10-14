@@ -1,5 +1,5 @@
 {
-  "name": "karla/delivery",
+  "name": "gokarla/shopware",
   "description": "Automatically transmit orders from your shop to Karla, providing precise and timely updates to your customers and improving the post-purchase experience.",
   "type": "shopware-platform-plugin",
   "license": "Apache-2.0",
