@@ -2041,4 +2041,113 @@ class OrderSubscriberTest extends TestCase
         // Act
         $orderSubscriber->onOrderWritten($event);
     }
+
+    /**
+     * Test that multiple tracking codes on a single delivery are all sent
+     */
+    public function testOnOrderWrittenWithMultipleTrackingCodes()
+    {
+        // Arrange: Create delivery with multiple tracking codes
+        $lineItemMock = $this->createMock(OrderLineItemEntity::class);
+        $lineItemMock->method('getId')->willReturn('line-item-id-123');
+        $lineItemMock->method('getReferencedId')->willReturn('product-id-123');
+        $lineItemMock->method('getType')->willReturn('product');
+        $lineItemMock->method('getLabel')->willReturn('Test Product');
+        $lineItemMock->method('getQuantity')->willReturn(2);
+        $lineItemMock->method('getUnitPrice')->willReturn(25.00);
+        $lineItemMock->method('getTotalPrice')->willReturn(50.00);
+        $lineItemMock->method('getPayload')->willReturn([]);
+
+        $productMock = $this->createMock(ProductEntity::class);
+        $productMock->method('getProductNumber')->willReturn('SKU-123');
+        $lineItemMock->method('getProduct')->willReturn($productMock);
+
+        $deliveryPositionMock = $this->createMock(OrderDeliveryPositionEntity::class);
+        $deliveryPositionMock->method('getOrderLineItem')->willReturn($lineItemMock);
+
+        $deliveryPositionCollection = new OrderDeliveryPositionCollection([$deliveryPositionMock]);
+
+        // Create delivery with MULTIPLE tracking codes (the key scenario)
+        $deliveryMock = $this->createMock(OrderDeliveryEntity::class);
+        $deliveryMock->method('getTrackingCodes')->willReturn(['TRACK-001', 'TRACK-002', 'TRACK-003']);
+        $deliveryMock->method('getPositions')->willReturn($deliveryPositionCollection);
+        $deliveryMock->method('getStateMachineState')->willReturn($this->createMockStateMachineState('shipped'));
+
+        $deliveryCollection = new OrderDeliveryCollection([$deliveryMock]);
+
+        $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
+        $orderEntity->method('getId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getOrderNumber')->willReturn('ORD-MULTI-TRACK-001');
+        $orderEntity->method('getAmountTotal')->willReturn(50.00);
+        $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+
+        $priceMock = $this->createMock(CartPrice::class);
+        $priceMock->method('getTotalPrice')->willReturn(50.00);
+        $orderEntity->method('getPrice')->willReturn($priceMock);
+
+        $orderEntity->method('getLineItems')->willReturn(new OrderLineItemCollection());
+        $orderEntity->method('getDeliveries')->willReturn($deliveryCollection);
+        $orderEntity->method('getTags')->willReturn(new TagCollection());
+        $orderEntity->method('getAddresses')->willReturn(new OrderAddressCollection());
+        $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
+        $orderEntity->method('getAffiliateCode')->willReturn(null);
+        $orderEntity->method('getCampaignCode')->willReturn(null);
+        $orderEntity->method('getOrderCustomer')->willReturn(null);
+        $orderEntity->method('getCurrency')->willReturn(null);
+
+        $searchResultMock = $this->createMock(EntitySearchResult::class);
+        $searchResultMock->method('first')->willReturn($orderEntity);
+        $searchResultMock->method('getIterator')->willReturn(new \ArrayIterator([$orderEntity]));
+        $this->orderRepositoryMock->method('search')->willReturn($searchResultMock);
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getStatusCode')->willReturn(200);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: Verify all 3 tracking codes are sent with products
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->anything(),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+                    $trackings = $body['trackings'] ?? [];
+
+                    // Should have 3 trackings (one for each tracking code)
+                    $this->assertCount(3, $trackings);
+
+                    // Verify each tracking has the correct tracking number
+                    $this->assertEquals('TRACK-001', $trackings[0]['tracking_number']);
+                    $this->assertEquals('TRACK-002', $trackings[1]['tracking_number']);
+                    $this->assertEquals('TRACK-003', $trackings[2]['tracking_number']);
+
+                    // Verify each tracking has products (same products for all)
+                    foreach ($trackings as $tracking) {
+                        $this->assertArrayHasKey('products', $tracking);
+                        $this->assertArrayHasKey('tracking_placed_at', $tracking);
+                    }
+
+                    return true;
+                })
+            )
+            ->willReturn($responseMock);
+
+        $event = $this->mockOrderEvent(
+            $this->createSalesChannelApiSourceContextMock(),
+            $orderEntity
+        );
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
 }

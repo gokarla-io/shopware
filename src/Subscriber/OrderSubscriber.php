@@ -370,9 +370,17 @@ class OrderSubscriber implements EventSubscriberInterface
                 continue;
             }
             $trackingCodes = $delivery->getTrackingCodes();
-            // Supports only one tracking code per delivery
-            $trackingNumber = $trackingCodes ? $trackingCodes[0] : null;
-            if ($trackingNumber) {
+            if (empty($trackingCodes)) {
+                $this->logger->info('Delivery skipped - no tracking codes', [
+                    'component' => 'order.sync',
+                    'order_number' => $orderNumber,
+                ]);
+
+                continue;
+            }
+
+            $deliveryProducts = $this->readDeliveryPositions($delivery->getPositions());
+            foreach ($trackingCodes as $trackingNumber) {
                 if ($this->debugMode) {
                     $this->logger->debug('Delivery found with tracking number', [
                         'component' => 'order.sync',
@@ -383,14 +391,9 @@ class OrderSubscriber implements EventSubscriberInterface
                 $orderUpsertPayload['trackings'][] = [
                     'tracking_number' => $trackingNumber,
                     'tracking_placed_at' => (new \DateTime())->format(\DateTime::ATOM),
-                    'products' => $this->readDeliveryPositions($delivery->getPositions()),
+                    'products' => $deliveryProducts,
                 ];
                 $nDeliveries++;
-            } else {
-                $this->logger->info('Delivery skipped - no tracking codes', [
-                    'component' => 'order.sync',
-                    'order_number' => $orderNumber,
-                ]);
             }
         }
 
