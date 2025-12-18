@@ -50,16 +50,18 @@ jobs:
       - name: Generate coverage report
         run: make coverage
 
-      - name: Build distributable file
-        if: github.ref == 'refs/heads/main'
-        run: make build
-
       - name: Create Release
         if: github.ref == 'refs/heads/main'
         id: create_release
         uses: darioblanco/release-wizard@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build distributable file
+        if: github.ref == 'refs/heads/main'
+        run: make build
+        env:
+          PLUGIN_VERSION: ${{ steps.create_release.outputs.new_version }}
 
       - name: Upload release asset
         if: github.ref == 'refs/heads/main'

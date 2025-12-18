@@ -33,10 +33,10 @@ install: init ## install local project dependencies
 clean: init ## cleans up all containers and other temporary files
 	$(DOCKER_COMPOSE_CMD) -f $(DOCKER_COMPOSE_FILE) down
 
-build: init ## build files for distribution
+build: init ## build files for distribution (use PLUGIN_VERSION env var to override version)
 	@echo "Building distribution package..."
-	@# Get version from latest git tag, fallback to "dev-main" if no tags
-	$(eval VERSION := $(shell git describe --tags --abbrev=0 2>/dev/null || echo "dev-main"))
+	@# Get version from PLUGIN_VERSION env var, or fall back to git tag, or "dev-main"
+	$(eval VERSION := $(or $(PLUGIN_VERSION),$(shell git describe --tags --abbrev=0 2>/dev/null),dev-main))
 	@echo "Version: $(VERSION)"
 	@# Create build directory
 	mkdir -p dist/KarlaDelivery/src
