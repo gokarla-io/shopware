@@ -302,9 +302,11 @@ class OrderSubscriber implements EventSubscriberInterface
             return;
         }
 
-        $customer = $order->getOrderCustomer();
-        $customerEmail = $customer ? $customer->getEmail() : null;
-        $customerId = $customer && $customer->getCustomer() ? $customer->getCustomer()->getId() : null;
+        $orderCustomer = $order->getOrderCustomer();
+        $customerEmail = $orderCustomer ? $orderCustomer->getEmail() : null;
+        $customerEntity = $orderCustomer ? $orderCustomer->getCustomer() : null;
+        // Only include customer ID for registered (non-guest) customers
+        $customerId = ($customerEntity && ! $customerEntity->getGuest()) ? $customerEntity->getId() : null;
 
         $currency = $order->getCurrency();
         $currencyCode = $currency ? $currency->getIsoCode() : null;

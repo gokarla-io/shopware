@@ -50,6 +50,8 @@ trait OrderMockBuilderTrait
      * @param OrderDeliveryCollection|null $deliveries Delivery collection
      * @param OrderLineItemCollection|null $lineItems Line item collection
      * @param bool $includeAddress Whether to include address (default: true)
+     * @param bool|null $isGuestCustomer Whether the customer is a guest (null = no customer)
+     * @param string|null $customerId Customer ID to use (auto-generated if not provided)
      * @return \PHPUnit\Framework\MockObject\MockObject&OrderEntity
      */
     protected function createOrderMock(
@@ -62,7 +64,9 @@ trait OrderMockBuilderTrait
         ?string $salesChannel = null,
         ?OrderDeliveryCollection $deliveries = null,
         ?OrderLineItemCollection $lineItems = null,
-        bool $includeAddress = true
+        bool $includeAddress = true,
+        ?bool $isGuestCustomer = null,
+        ?string $customerId = null
     ): OrderEntity {
         $orderEntity = $this->createMock(OrderEntity::class);
 
@@ -94,9 +98,16 @@ trait OrderMockBuilderTrait
         }
         $orderEntity->method('getTags')->willReturn($tagCollection);
 
-        // Customer with tags and group
-        if (! empty($customerTags) || $customerGroup !== null) {
+        // Customer with tags, group, and guest status
+        $hasCustomerData = ! empty($customerTags) || $customerGroup !== null || $isGuestCustomer !== null;
+        if ($hasCustomerData) {
             $customer = $this->createMock(CustomerEntity::class);
+
+            // Customer ID
+            $customer->method('getId')->willReturn($customerId ?? Uuid::randomHex());
+
+            // Guest status
+            $customer->method('getGuest')->willReturn($isGuestCustomer ?? false);
 
             // Customer tags
             if (! empty($customerTags)) {
@@ -122,6 +133,7 @@ trait OrderMockBuilderTrait
 
             $orderCustomer = $this->createMock(OrderCustomerEntity::class);
             $orderCustomer->method('getCustomer')->willReturn($customer);
+            $orderCustomer->method('getEmail')->willReturn('test@example.com');
 
             $orderEntity->method('getOrderCustomer')->willReturn($orderCustomer);
         } else {

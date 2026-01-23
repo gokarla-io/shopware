@@ -2150,4 +2150,141 @@ class OrderSubscriberTest extends TestCase
         // Act
         $orderSubscriber->onOrderWritten($event);
     }
+
+    /**
+     * Test that registered (non-guest) customers have external_customer_id included
+     */
+    public function testOrderWithRegisteredCustomerIncludesExternalCustomerId()
+    {
+        // Arrange: Create order with a registered customer
+        $customerId = Uuid::randomHex();
+        $orderEntity = $this->createOrderMock(
+            isGuestCustomer: false,
+            customerId: $customerId
+        );
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: Verify external_customer_id is included in the payload
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) use ($customerId) {
+                    $body = json_decode($options['body'], true);
+
+                    // Verify external_customer_id is set to the customer ID
+                    return isset($body['order']['external_customer_id'])
+                        && $body['order']['external_customer_id'] === $customerId;
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test that guest customers do NOT have external_customer_id included
+     */
+    public function testOrderWithGuestCustomerExcludesExternalCustomerId()
+    {
+        // Arrange: Create order with a guest customer
+        $orderEntity = $this->createOrderMock(
+            isGuestCustomer: true,
+            customerId: Uuid::randomHex() // Guest customers still have IDs in Shopware
+        );
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: Verify external_customer_id is null for guest customers
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+
+                    // Verify external_customer_id is null for guest
+                    return array_key_exists('external_customer_id', $body['order'])
+                        && $body['order']['external_customer_id'] === null;
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test that orders without customer entity have null external_customer_id
+     */
+    public function testOrderWithoutCustomerEntityHasNullExternalCustomerId()
+    {
+        // Arrange: Create order without any customer (getOrderCustomer returns null)
+        $orderEntity = $this->createOrderMock();
+        // Default createOrderMock with no customer params returns getOrderCustomer() => null
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: Verify external_customer_id is null when no customer entity
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+
+                    // Verify external_customer_id is null
+                    return array_key_exists('external_customer_id', $body['order'])
+                        && $body['order']['external_customer_id'] === null;
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
 }
