@@ -2846,6 +2846,90 @@ class OrderSubscriberTest extends TestCase
     }
 
     /**
+     * Test onOrderDeliveryWritten with debug mode and delivery repository fallback
+     */
+    public function testOnOrderDeliveryWrittenWithDebugModeAndRepositoryFallback()
+    {
+        // Arrange: Enable debug mode
+        $systemConfigMock = $this->createMock(SystemConfigService::class);
+        $configMap = ConfigBuilder::create()
+            ->withDebugMode(true)
+            ->buildMap();
+        $systemConfigMock->method('get')->willReturnMap($configMap);
+
+        $context = $this->createAdminApiSourceContextMock();
+        $deliveryId = Uuid::randomHex();
+        $orderId = Uuid::randomHex();
+
+        // Payload without orderId to trigger fallback
+        $entityWriteResult = new EntityWriteResult(
+            $deliveryId,
+            ['id' => $deliveryId],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$entityWriteResult],
+            $context,
+        );
+
+        // Mock delivery repository to return a delivery with an orderId
+        $deliveryEntity = $this->createMock(OrderDeliveryEntity::class);
+        $deliveryEntity->method('getOrderId')->willReturn($orderId);
+        $deliverySearchResult = new EntitySearchResult(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            1,
+            new OrderDeliveryCollection([$deliveryEntity]),
+            null,
+            new Criteria([$deliveryId]),
+            $context,
+        );
+        $this->orderDeliveryRepositoryMock->expects($this->once())
+            ->method('search')
+            ->willReturn($deliverySearchResult);
+
+        // Mock order repository
+        $orderEntity = $this->createOrderMock(
+            deliveries: $this->createDeliveryCollectionWithTracking(),
+        );
+        $orderSearchResult = new EntitySearchResult(
+            OrderDefinition::ENTITY_NAME,
+            1,
+            new OrderCollection([$orderEntity]),
+            null,
+            new Criteria([$orderId]),
+            $context,
+        );
+        $this->orderRepositoryMock->expects($this->once())
+            ->method('search')
+            ->willReturn($orderSearchResult);
+
+        // Assert: Expect debug logs (both the initial payload log and the resolved IDs log)
+        $this->loggerMock->expects($this->atLeastOnce())
+            ->method('debug');
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $systemConfigMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
      * Helper: create a delivery collection with a shipped delivery and tracking code
      */
     private function createDeliveryCollectionWithTracking(): OrderDeliveryCollection
