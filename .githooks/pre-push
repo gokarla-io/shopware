@@ -1,0 +1,28 @@
+#!/bin/sh
+
+echo "Running pre-push hook: make test"
+
+make test
+
+if [ $? -ne 0 ]; then
+  echo "Tests failed. Push aborted."
+  exit 1
+fi
+
+echo "Tests passed."
+
+# Only run coverage if Xdebug is available
+if php -m 2>/dev/null | grep -qi xdebug; then
+  echo "Running pre-push hook: make coverage"
+
+  make coverage
+
+  if [ $? -ne 0 ]; then
+    echo "Coverage check failed. Push aborted."
+    exit 1
+  fi
+
+  echo "Coverage check passed."
+else
+  echo "Skipping coverage check (Xdebug not available)."
+fi
