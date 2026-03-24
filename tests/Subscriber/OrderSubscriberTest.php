@@ -59,6 +59,9 @@ class OrderSubscriberTest extends TestCase
     /** @var EntityRepository&\PHPUnit\Framework\MockObject\MockObject */
     private EntityRepository $orderRepositoryMock;
 
+    /** @var EntityRepository&\PHPUnit\Framework\MockObject\MockObject */
+    private EntityRepository $orderDeliveryRepositoryMock;
+
     /** @var HttpClientInterface&\PHPUnit\Framework\MockObject\MockObject */
     private HttpClientInterface $httpClientMock;
 
@@ -69,6 +72,7 @@ class OrderSubscriberTest extends TestCase
     {
         $this->loggerMock = $this->createMock(LoggerInterface::class);
         $this->orderRepositoryMock = $this->createMock(EntityRepository::class);
+        $this->orderDeliveryRepositoryMock = $this->createMock(EntityRepository::class);
         $this->httpClientMock = $this->createMock(HttpClientInterface::class);
         $this->systemConfigServiceMock = $this->createMock(SystemConfigService::class);
 
@@ -370,6 +374,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -403,6 +408,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -461,6 +467,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -648,6 +655,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -693,6 +701,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -760,6 +769,7 @@ class OrderSubscriberTest extends TestCase
             $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -807,6 +817,7 @@ class OrderSubscriberTest extends TestCase
             $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
     }
@@ -846,6 +857,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -876,6 +888,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -913,6 +926,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -956,6 +970,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1005,6 +1020,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1066,6 +1082,7 @@ class OrderSubscriberTest extends TestCase
             $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1208,6 +1225,7 @@ class OrderSubscriberTest extends TestCase
             $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1249,6 +1267,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1290,6 +1309,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1335,6 +1355,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1377,6 +1398,7 @@ class OrderSubscriberTest extends TestCase
             $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1468,6 +1490,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1534,6 +1557,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1647,6 +1671,7 @@ class OrderSubscriberTest extends TestCase
             $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1720,6 +1745,7 @@ class OrderSubscriberTest extends TestCase
             $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1784,6 +1810,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -1900,6 +1927,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2038,6 +2066,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2147,6 +2176,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2194,6 +2224,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2240,6 +2271,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2284,6 +2316,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2372,6 +2405,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2418,6 +2452,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2466,6 +2501,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2497,6 +2533,7 @@ class OrderSubscriberTest extends TestCase
             $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2561,6 +2598,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2569,9 +2607,84 @@ class OrderSubscriberTest extends TestCase
     }
 
     /**
-     * Test onOrderDeliveryWritten skips when payload has no orderId and logs info
+     * Test onOrderDeliveryWritten resolves order IDs from delivery repository
+     * when orderId is not in the event payload (e.g. ERP PATCH with only trackingCodes)
      */
-    public function testOnOrderDeliveryWrittenSkipsWhenNoOrderIdInPayload()
+    public function testOnOrderDeliveryWrittenResolvesOrderIdFromDeliveryRepository()
+    {
+        $context = $this->createAdminApiSourceContextMock();
+        $deliveryId = Uuid::randomHex();
+        $orderId = Uuid::randomHex();
+
+        // Payload without orderId (simulates ERP PATCH with only trackingCodes)
+        $entityWriteResult = new EntityWriteResult(
+            $deliveryId,
+            ['id' => $deliveryId],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$entityWriteResult],
+            $context,
+        );
+
+        // Mock delivery repository to return a delivery with an orderId
+        $deliveryEntity = $this->createMock(OrderDeliveryEntity::class);
+        $deliveryEntity->method('getOrderId')->willReturn($orderId);
+        $deliverySearchResult = new EntitySearchResult(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            1,
+            new OrderDeliveryCollection([$deliveryEntity]),
+            null,
+            new Criteria([$deliveryId]),
+            $context,
+        );
+        $this->orderDeliveryRepositoryMock->expects($this->once())
+            ->method('search')
+            ->willReturn($deliverySearchResult);
+
+        // Mock order repository to return an order for the resolved orderId
+        $orderEntity = $this->createOrderMock(
+            deliveries: $this->createDeliveryCollectionWithTracking(),
+        );
+        $orderSearchResult = new EntitySearchResult(
+            OrderDefinition::ENTITY_NAME,
+            1,
+            new OrderCollection([$orderEntity]),
+            null,
+            new Criteria([$orderId]),
+            $context,
+        );
+        $this->orderRepositoryMock->expects($this->once())
+            ->method('search')
+            ->willReturn($orderSearchResult);
+
+        // Assert: Expect HTTP request (order was resolved and synced)
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
+     * Test onOrderDeliveryWritten skips when neither payload nor delivery lookup yields order IDs
+     */
+    public function testOnOrderDeliveryWrittenSkipsWhenNoOrderIdFound()
     {
         $context = $this->createAdminApiSourceContextMock();
         $deliveryId = Uuid::randomHex();
@@ -2590,7 +2703,20 @@ class OrderSubscriberTest extends TestCase
             $context,
         );
 
-        // Assert: No HTTP request and no repository search
+        // Mock delivery repository to return empty results
+        $deliverySearchResult = new EntitySearchResult(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            0,
+            new OrderDeliveryCollection([]),
+            null,
+            new Criteria([$deliveryId]),
+            $context,
+        );
+        $this->orderDeliveryRepositoryMock->expects($this->once())
+            ->method('search')
+            ->willReturn($deliverySearchResult);
+
+        // Assert: No HTTP request and no order repository search
         $this->httpClientMock->expects($this->never())
             ->method('request');
         $this->orderRepositoryMock->expects($this->never())
@@ -2600,7 +2726,7 @@ class OrderSubscriberTest extends TestCase
         $this->loggerMock->expects($this->once())
             ->method('info')
             ->with(
-                'Order delivery sync skipped - no order IDs in payload',
+                'Order delivery sync skipped - no order IDs found',
                 $this->callback(function ($context) {
                     return $context['component'] === 'order.delivery.sync';
                 })
@@ -2610,6 +2736,7 @@ class OrderSubscriberTest extends TestCase
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
@@ -2661,6 +2788,7 @@ class OrderSubscriberTest extends TestCase
             $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
             $this->httpClientMock
         );
 
