@@ -73,12 +73,12 @@ class OrderSubscriber implements EventSubscriberInterface
     /**
      * @var array
      */
-    private array $allowedOrderStatuses;
+    private array $allowedOrderStatuses = [];
 
     /**
      * @var array
      */
-    private array $allowedDeliveryStatuses;
+    private array $allowedDeliveryStatuses = [];
 
     /**
      * @var string
