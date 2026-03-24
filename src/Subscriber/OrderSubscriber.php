@@ -245,9 +245,18 @@ class OrderSubscriber implements EventSubscriberInterface
      */
     public function onOrderDeliveryWritten(EntityWrittenEvent $event): void
     {
+        $payloads = $event->getPayloads();
+
+        if ($this->debugMode) {
+            $this->logger->debug('Received order_delivery.written event', [
+                'component' => 'order.delivery.sync',
+                'payloads' => $payloads,
+            ]);
+        }
+
         // Extract unique order IDs from the delivery payloads
         $orderIds = [];
-        foreach ($event->getPayloads() as $payload) {
+        foreach ($payloads as $payload) {
             if (isset($payload['orderId'])) {
                 $orderIds[$payload['orderId']] = true;
             }
@@ -255,6 +264,10 @@ class OrderSubscriber implements EventSubscriberInterface
         $orderIds = array_keys($orderIds);
 
         if (empty($orderIds)) {
+            $this->logger->info('Order delivery sync skipped - no order IDs in payload', [
+                'component' => 'order.delivery.sync',
+            ]);
+
             return;
         }
 
