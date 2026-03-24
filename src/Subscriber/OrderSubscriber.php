@@ -42,6 +42,11 @@ class OrderSubscriber implements EventSubscriberInterface
     private EntityRepository $orderRepository;
 
     /**
+     * @var EntityRepository
+     */
+    private EntityRepository $orderDeliveryRepository;
+
+    /**
      * @var HttpClientInterface
      */
     private HttpClientInterface $httpClient;
@@ -101,16 +106,19 @@ class OrderSubscriber implements EventSubscriberInterface
      * @param SystemConfigService $systemConfigService
      * @param LoggerInterface $logger
      * @param EntityRepository $orderRepository
+     * @param EntityRepository $orderDeliveryRepository
      * @param HttpClientInterface $httpClient
      */
     public function __construct(
         SystemConfigService $systemConfigService,
         LoggerInterface $logger,
         EntityRepository $orderRepository,
+        EntityRepository $orderDeliveryRepository,
         HttpClientInterface $httpClient,
     ) {
         $this->logger = $logger;
         $this->orderRepository = $orderRepository;
+        $this->orderDeliveryRepository = $orderDeliveryRepository;
         $this->httpClient = $httpClient;
 
         // General Configuration
@@ -261,10 +269,34 @@ class OrderSubscriber implements EventSubscriberInterface
                 $orderIds[$payload['orderId']] = true;
             }
         }
+
+        // When orderId is not in the payload (e.g. ERP PATCH with only trackingCodes),
+        // look up the order IDs from the delivery entities
+        if (empty($orderIds)) {
+            $deliveryIds = $event->getIds();
+            $deliveryCriteria = new Criteria($deliveryIds);
+            $deliveries = $this->orderDeliveryRepository->search($deliveryCriteria, $event->getContext());
+
+            foreach ($deliveries as $delivery) {
+                $orderId = $delivery->getOrderId();
+                if ($orderId) {
+                    $orderIds[$orderId] = true;
+                }
+            }
+
+            if ($this->debugMode) {
+                $this->logger->debug('Resolved order IDs from delivery entities', [
+                    'component' => 'order.delivery.sync',
+                    'delivery_ids' => $deliveryIds,
+                    'order_ids' => array_keys($orderIds),
+                ]);
+            }
+        }
+
         $orderIds = array_keys($orderIds);
 
         if (empty($orderIds)) {
-            $this->logger->info('Order delivery sync skipped - no order IDs in payload', [
+            $this->logger->info('Order delivery sync skipped - no order IDs found', [
                 'component' => 'order.delivery.sync',
             ]);
 

@@ -14,6 +14,7 @@
             <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService" />
             <argument type="service" id="monolog.logger.karla_delivery"/>
             <argument type="service" id="order.repository"/>
+            <argument type="service" id="order_delivery.repository"/>
             <argument type="service" id="Symfony\Contracts\HttpClient\HttpClientInterface"/>
             <tag name="kernel.event_subscriber"/>
         </service>
