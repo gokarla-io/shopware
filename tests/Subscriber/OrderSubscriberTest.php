@@ -2581,6 +2581,45 @@ class OrderSubscriberTest extends TestCase
     }
 
     /**
+     * Test onOrderDeliveryWritten skips when payload has no orderId
+     */
+    public function testOnOrderDeliveryWrittenSkipsWhenNoOrderIdInPayload()
+    {
+        $context = $this->createAdminApiSourceContextMock();
+        $deliveryId = Uuid::randomHex();
+        // Payload without orderId
+        $entityWriteResult = new EntityWriteResult(
+            $deliveryId,
+            ['id' => $deliveryId],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$entityWriteResult],
+            $context,
+        );
+
+        // Assert: No HTTP request and no repository search
+        $this->httpClientMock->expects($this->never())
+            ->method('request');
+        $this->orderRepositoryMock->expects($this->never())
+            ->method('search');
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
      * Helper: create a delivery collection with a shipped delivery and tracking code
      */
     private function createDeliveryCollectionWithTracking(): OrderDeliveryCollection
