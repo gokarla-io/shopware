@@ -11,6 +11,7 @@ use Shopware\Core\Checkout\Cart\Price\Struct\CartPrice;
 use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryCollection;
+use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryDefinition;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDeliveryPosition\OrderDeliveryPositionCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDeliveryPosition\OrderDeliveryPositionEntity;
@@ -776,6 +777,8 @@ class OrderSubscriberTest extends TestCase
         $this->assertIsArray($events);
         $this->assertArrayHasKey('order.written', $events);
         $this->assertEquals('onOrderWritten', $events['order.written']);
+        $this->assertArrayHasKey('order_delivery.written', $events);
+        $this->assertEquals('onOrderDeliveryWritten', $events['order_delivery.written']);
     }
 
     /**
@@ -2286,5 +2289,320 @@ class OrderSubscriberTest extends TestCase
 
         // Act
         $orderSubscriber->onOrderWritten($event);
+    }
+
+    // =========================================================================
+    // Order Delivery Written Event Tests
+    // =========================================================================
+
+    /**
+     * Create a mock OrderDeliveryWritten event based on an order entity
+     */
+    private function mockOrderDeliveryEvent(Context $context, OrderEntity $orderEntity): EntityWrittenEvent
+    {
+        $deliveryId = Uuid::randomHex();
+        $orderId = $orderEntity->getId();
+        $deliveryData = [
+            'id' => $deliveryId,
+            'orderId' => $orderId,
+        ];
+
+        $criteria = new Criteria([$orderId]);
+        $entitySearchResult = new EntitySearchResult(
+            OrderDefinition::ENTITY_NAME,
+            1,
+            new OrderCollection([$orderEntity]),
+            null,
+            $criteria,
+            $context,
+        );
+        $entityWriteResult = new EntityWriteResult(
+            $deliveryId,
+            $deliveryData,
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$entityWriteResult],
+            $context,
+        );
+        $this->orderRepositoryMock->expects($this->any())
+            ->method('search')
+            ->willReturn($entitySearchResult);
+
+        return $event;
+    }
+
+    /**
+     * Test that getSubscribedEvents includes order_delivery.written
+     */
+    public function testGetSubscribedEventsIncludesOrderDeliveryWritten()
+    {
+        $events = OrderSubscriber::getSubscribedEvents();
+
+        $this->assertIsArray($events);
+        $this->assertArrayHasKey('order_delivery.written', $events);
+        $this->assertEquals('onOrderDeliveryWritten', $events['order_delivery.written']);
+    }
+
+    /**
+     * Test onOrderDeliveryWritten sends tracking codes to Karla
+     */
+    public function testOnOrderDeliveryWrittenSendsTrackingCodes()
+    {
+        // Arrange: Create order with delivery and tracking codes
+        $orderEntity = $this->createOrderMock(
+            deliveries: $this->createDeliveryCollectionWithTracking(),
+        );
+
+        $event = $this->mockOrderDeliveryEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Assert: Expect HTTP request with tracking data
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+
+                    return ! empty($body['trackings'])
+                        && $body['trackings'][0]['tracking_number'] === '123456';
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
+     * Test onOrderDeliveryWritten skips order status check
+     * (order is in 'completed' status which is NOT in default allowed statuses,
+     * but delivery-triggered sync should still proceed)
+     */
+    public function testOnOrderDeliveryWrittenSkipsOrderStatusCheck()
+    {
+        // Arrange: Create order with 'completed' status (not in default allowed statuses)
+        $orderEntity = $this->createOrderMock(
+            status: 'completed',
+            deliveries: $this->createDeliveryCollectionWithTracking(),
+        );
+
+        $event = $this->mockOrderDeliveryEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Assert: Expect HTTP request despite order status not being allowed
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+
+                    return ! empty($body['trackings'])
+                        && $body['trackings'][0]['tracking_number'] === '123456';
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
+     * Test onOrderDeliveryWritten still respects delivery status check
+     */
+    public function testOnOrderDeliveryWrittenRespectsDeliveryStatusCheck()
+    {
+        // Arrange: Create order with delivery in 'open' status (not in default allowed delivery statuses)
+        $delivery = $this->createMock(OrderDeliveryEntity::class);
+        $delivery->method('getStateMachineState')->willReturn($this->createMockStateMachineState('open'));
+        $delivery->method('getTrackingCodes')->willReturn(['123456']);
+        $delivery->method('getPositions')->willReturn(new OrderDeliveryPositionCollection([]));
+
+        $orderEntity = $this->createOrderMock(
+            status: 'completed',
+            deliveries: new OrderDeliveryCollection([$delivery]),
+        );
+
+        $event = $this->mockOrderDeliveryEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Assert: Expect HTTP request but with empty trackings (delivery status filtered out)
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) {
+                    $body = json_decode($options['body'], true);
+
+                    return empty($body['trackings']);
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
+     * Test onOrderDeliveryWritten skipped when configuration is missing
+     */
+    public function testOnOrderDeliveryWrittenSkippedWhenConfigurationMissing()
+    {
+        // Arrange: Setup config with missing API credentials
+        $systemConfigMock = $this->createMock(SystemConfigService::class);
+        $configMap = ConfigBuilder::create()
+            ->withMissingApiConfig()
+            ->withDefaultOrderStatuses()
+            ->withDefaultDeliveryStatuses()
+            ->withDefaultMappings()
+            ->buildMap();
+
+        $systemConfigMock->method('get')->willReturnMap($configMap);
+
+        // Assert: Expect no HTTP request
+        $this->httpClientMock->expects($this->never())
+            ->method('request');
+
+        $orderSubscriber = new OrderSubscriber(
+            $systemConfigMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Create a minimal delivery event
+        $context = $this->createAdminApiSourceContextMock();
+        $deliveryId = Uuid::randomHex();
+        $entityWriteResult = new EntityWriteResult(
+            $deliveryId,
+            ['id' => $deliveryId, 'orderId' => Uuid::randomHex()],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$entityWriteResult],
+            $context,
+        );
+
+        // Act
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
+     * Test exception handling in onOrderDeliveryWritten
+     */
+    public function testExceptionHandlingInOnOrderDeliveryWritten()
+    {
+        // Make the repository throw an exception
+        $this->orderRepositoryMock->method('search')
+            ->willThrowException(new \Exception('Database error'));
+
+        $context = $this->createAdminApiSourceContextMock();
+        $deliveryId = Uuid::randomHex();
+        $entityWriteResult = new EntityWriteResult(
+            $deliveryId,
+            ['id' => $deliveryId, 'orderId' => Uuid::randomHex()],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$entityWriteResult],
+            $context,
+        );
+
+        // Expect error log
+        $this->loggerMock->expects($this->once())
+            ->method('error')
+            ->with(
+                'Unexpected error during order delivery sync',
+                $this->callback(function ($context) {
+                    return $context['component'] === 'order.delivery.sync'
+                        && $context['error'] === 'Database error';
+                })
+            );
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act - should not throw
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
+     * Helper: create a delivery collection with a shipped delivery and tracking code
+     */
+    private function createDeliveryCollectionWithTracking(): OrderDeliveryCollection
+    {
+        $delivery = $this->createMock(OrderDeliveryEntity::class);
+        $delivery->method('getStateMachineState')->willReturn($this->createMockStateMachineState('shipped'));
+        $delivery->method('getTrackingCodes')->willReturn(['123456']);
+
+        $productLineItem = $this->createMock(OrderLineItemEntity::class);
+        $productLineItem->method('getId')->willReturn(Uuid::randomHex());
+        $productLineItem->method('getReferencedId')->willReturn(Uuid::randomHex());
+        $productLineItem->method('getType')->willReturn('product');
+        $productLineItem->method('getLabel')->willReturn('Test Product');
+        $productLineItem->method('getQuantity')->willReturn(1);
+        $productLineItem->method('getUnitPrice')->willReturn(10.00);
+        $productLineItem->method('getTotalPrice')->willReturn(10.00);
+        $productLineItem->method('getProduct')->willReturn(null);
+
+        $deliveryPosition = $this->createMock(OrderDeliveryPositionEntity::class);
+        $deliveryPosition->method('getOrderLineItem')->willReturn($productLineItem);
+        $delivery->method('getPositions')->willReturn(new OrderDeliveryPositionCollection([$deliveryPosition]));
+
+        return new OrderDeliveryCollection([$delivery]);
     }
 }
