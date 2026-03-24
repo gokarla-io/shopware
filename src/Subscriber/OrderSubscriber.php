@@ -211,13 +211,14 @@ class OrderSubscriber implements EventSubscriberInterface
     }
 
     /**
-     * Listen for order events
+     * Listen for order and delivery events
      * @return array
      */
     public static function getSubscribedEvents(): array
     {
         return [
-        OrderEvents::ORDER_WRITTEN_EVENT => 'onOrderWritten',
+            OrderEvents::ORDER_WRITTEN_EVENT => 'onOrderWritten',
+            OrderEvents::ORDER_DELIVERY_WRITTEN_EVENT => 'onOrderDeliveryWritten',
         ];
     }
 
@@ -279,19 +280,92 @@ class OrderSubscriber implements EventSubscriberInterface
     }
 
     /**
+     * Handle the order delivery written event.
+     * This covers cases where an ERP writes tracking codes directly to the
+     * order_delivery entity without triggering an order.written event.
+     * @param EntityWrittenEvent $event
+     */
+    public function onOrderDeliveryWritten(EntityWrittenEvent $event): void
+    {
+        try {
+            if (empty($this->shopSlug) || empty($this->apiUsername) || empty($this->apiKey) || empty($this->apiUrl)) {
+                $this->logger->warning('Order sync skipped - missing configuration', [
+                    'component' => 'order.delivery.sync',
+                ]);
+
+                return;
+            }
+
+            $context = $event->getContext();
+
+            // Extract unique order IDs from the delivery payloads
+            $orderIds = [];
+            foreach ($event->getPayloads() as $payload) {
+                if (isset($payload['orderId'])) {
+                    $orderIds[$payload['orderId']] = true;
+                }
+            }
+            $orderIds = array_keys($orderIds);
+
+            if (empty($orderIds)) {
+                return;
+            }
+
+            $criteria = new Criteria($orderIds);
+            $criteria->addAssociations([
+                'addresses.country',
+                'addresses.countryState',
+                'currency',
+                'deliveries.positions.orderLineItem.product',
+                'deliveries.positions',
+                'deliveries.stateMachineState',
+                'deliveries.trackingCodes',
+                'lineItems.product.cover.media',
+                'lineItems.product.cover',
+                'lineItems.product',
+                'orderCustomer',
+                'orderCustomer.customer',
+                'orderCustomer.customer.group',
+                'orderCustomer.customer.tags',
+                'salesChannel',
+                'stateMachineState',
+                'tags',
+                'transactions.stateMachineState',
+            ]);
+
+            $orders = $this->orderRepository->search($criteria, $context);
+            /** @var OrderEntity $order */
+            foreach ($orders as $order) {
+                $deliveries = $order->getDeliveries();
+                $this->sendKarlaOrder($order, $deliveries, $event, true);
+            }
+        } catch (\Throwable $t) {
+            $this->logger->error('Unexpected error during order delivery sync', [
+                'component' => 'order.delivery.sync',
+                'error' => $t->getMessage(),
+                'file' => $t->getFile(),
+                'line' => $t->getLine(),
+                'trace' => $t->getTraceAsString(),
+            ]);
+        }
+    }
+
+    /**
      * Upsert and optionally fulfill an order through Karla's API
      * @param OrderEntity $order
      * @param OrderDeliveryCollection $deliveries Array of OrderDeliveryEntity objects
+     * @param bool $skipOrderStatusCheck Skip order status filtering (used for delivery-triggered syncs)
      */
     private function sendKarlaOrder(
         OrderEntity $order,
         OrderDeliveryCollection $deliveries,
-        EntityWrittenEvent $event
+        EntityWrittenEvent $event,
+        bool $skipOrderStatusCheck = false
     ): void {
         $orderNumber = $order->getOrderNumber();
         $orderStatus = $order->getStateMachineState()->getTechnicalName();
 
-        if (! in_array($orderStatus, $this->allowedOrderStatuses, true)) {
+        if (! $skipOrderStatusCheck && ! in_array($orderStatus, $this->allowedOrderStatuses, true)) {
             $this->logger->info('Order skipped - status not allowed', [
                 'component' => 'order.sync',
                 'order_number' => $orderNumber,
