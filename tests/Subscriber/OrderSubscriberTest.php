@@ -2569,7 +2569,7 @@ class OrderSubscriberTest extends TestCase
     }
 
     /**
-     * Test onOrderDeliveryWritten skips when payload has no orderId
+     * Test onOrderDeliveryWritten skips when payload has no orderId and logs info
      */
     public function testOnOrderDeliveryWrittenSkipsWhenNoOrderIdInPayload()
     {
@@ -2596,8 +2596,69 @@ class OrderSubscriberTest extends TestCase
         $this->orderRepositoryMock->expects($this->never())
             ->method('search');
 
+        // Assert: Expect info log about missing order IDs
+        $this->loggerMock->expects($this->once())
+            ->method('info')
+            ->with(
+                'Order delivery sync skipped - no order IDs in payload',
+                $this->callback(function ($context) {
+                    return $context['component'] === 'order.delivery.sync';
+                })
+            );
+
         $orderSubscriber = new OrderSubscriber(
             $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
+     * Test onOrderDeliveryWritten logs payloads in debug mode
+     */
+    public function testOnOrderDeliveryWrittenWithDebugMode()
+    {
+        // Arrange: Enable debug mode
+        $systemConfigMock = $this->createMock(SystemConfigService::class);
+        $configMap = ConfigBuilder::create()
+            ->withDebugMode(true)
+            ->buildMap();
+        $systemConfigMock->method('get')->willReturnMap($configMap);
+
+        $orderEntity = $this->createOrderMock(
+            deliveries: $this->createDeliveryCollectionWithTracking(),
+        );
+
+        $event = $this->mockOrderDeliveryEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Assert: Expect debug log with payloads
+        $this->loggerMock->expects($this->atLeastOnce())
+            ->method('debug')
+            ->with(
+                $this->callback(function ($message) {
+                    // Accept any debug message, but at least one should be about the delivery event
+                    return true;
+                }),
+                $this->callback(function ($context) {
+                    return true;
+                })
+            );
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $systemConfigMock,
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->httpClientMock
