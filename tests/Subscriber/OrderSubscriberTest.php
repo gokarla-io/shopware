@@ -2745,6 +2745,55 @@ class OrderSubscriberTest extends TestCase
     }
 
     /**
+     * Test onOrderDeliveryWritten handles delivery repository failure gracefully
+     */
+    public function testOnOrderDeliveryWrittenHandlesDeliveryRepositoryFailure()
+    {
+        $context = $this->createAdminApiSourceContextMock();
+        $deliveryId = Uuid::randomHex();
+        // Payload without orderId to trigger delivery repository lookup
+        $entityWriteResult = new EntityWriteResult(
+            $deliveryId,
+            ['id' => $deliveryId],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$entityWriteResult],
+            $context,
+        );
+
+        // Make the delivery repository throw an exception
+        $this->orderDeliveryRepositoryMock->method('search')
+            ->willThrowException(new \Exception('Connection timeout'));
+
+        // Expect error log
+        $this->loggerMock->expects($this->once())
+            ->method('error')
+            ->with(
+                'Unexpected error during order delivery sync',
+                $this->callback(function ($context) {
+                    return $context['component'] === 'order.delivery.sync'
+                        && $context['error'] === 'Connection timeout';
+                })
+            );
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act - should not throw
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
      * Test onOrderDeliveryWritten logs payloads in debug mode
      */
     public function testOnOrderDeliveryWrittenWithDebugMode()
