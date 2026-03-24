@@ -15,6 +15,7 @@ use Shopware\Core\Checkout\Order\OrderEvents;
 use Shopware\Core\Content\Media\MediaEntity;
 use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
 use Shopware\Core\Content\Product\ProductEntity;
+use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
@@ -228,55 +229,12 @@ class OrderSubscriber implements EventSubscriberInterface
      */
     public function onOrderWritten(EntityWrittenEvent $event): void
     {
-        try {
-            if (empty($this->shopSlug) || empty($this->apiUsername) || empty($this->apiKey) || empty($this->apiUrl)) {
-                $this->logger->warning('Order sync skipped - missing configuration', [
-                    'component' => 'order.sync',
-                ]);
-
-                return;
-            }
-
-            $context = $event->getContext();
-            $orderIds = $event->getIds();
-
-            $criteria = new Criteria($orderIds);
-            $criteria->addAssociations([
-                'addresses.country',
-                'addresses.countryState',
-                'currency',
-                'deliveries.positions.orderLineItem.product',
-                'deliveries.positions',
-                'deliveries.stateMachineState',
-                'deliveries.trackingCodes',
-                'lineItems.product.cover.media',
-                'lineItems.product.cover',
-                'lineItems.product',
-                'orderCustomer',
-                'orderCustomer.customer',
-                'orderCustomer.customer.group',
-                'orderCustomer.customer.tags',
-                'salesChannel',
-                'stateMachineState',
-                'tags',
-                'transactions.stateMachineState',
-            ]);
-
-            $orders = $this->orderRepository->search($criteria, $context);
-            /** @var OrderEntity $order */
-            foreach ($orders as $order) {
-                $deliveries = $order->getDeliveries();
-                $this->sendKarlaOrder($order, $deliveries, $event);
-            }
-        } catch (\Throwable $t) {
-            $this->logger->error('Unexpected error during order sync', [
-                'component' => 'order.sync',
-                'error' => $t->getMessage(),
-                'file' => $t->getFile(),
-                'line' => $t->getLine(),
-                'trace' => $t->getTraceAsString(),
-            ]);
-        }
+        $this->processOrders(
+            $event->getIds(),
+            $event->getContext(),
+            'order.sync',
+            false
+        );
     }
 
     /**
@@ -287,27 +245,46 @@ class OrderSubscriber implements EventSubscriberInterface
      */
     public function onOrderDeliveryWritten(EntityWrittenEvent $event): void
     {
+        // Extract unique order IDs from the delivery payloads
+        $orderIds = [];
+        foreach ($event->getPayloads() as $payload) {
+            if (isset($payload['orderId'])) {
+                $orderIds[$payload['orderId']] = true;
+            }
+        }
+        $orderIds = array_keys($orderIds);
+
+        if (empty($orderIds)) {
+            return;
+        }
+
+        $this->processOrders(
+            $orderIds,
+            $event->getContext(),
+            'order.delivery.sync',
+            true
+        );
+    }
+
+    /**
+     * Fetch orders by ID and send each to Karla's API
+     * @param array $orderIds
+     * @param Context $context
+     * @param string $component Log component identifier
+     * @param bool $skipOrderStatusCheck Skip order status filtering (used for delivery-triggered syncs)
+     */
+    private function processOrders(
+        array $orderIds,
+        Context $context,
+        string $component,
+        bool $skipOrderStatusCheck
+    ): void {
         try {
-            if (empty($this->shopSlug) || empty($this->apiUsername) || empty($this->apiKey) || empty($this->apiUrl)) {
+            if (! $this->isConfigured()) {
                 $this->logger->warning('Order sync skipped - missing configuration', [
-                    'component' => 'order.delivery.sync',
+                    'component' => $component,
                 ]);
 
-                return;
-            }
-
-            $context = $event->getContext();
-
-            // Extract unique order IDs from the delivery payloads
-            $orderIds = [];
-            foreach ($event->getPayloads() as $payload) {
-                if (isset($payload['orderId'])) {
-                    $orderIds[$payload['orderId']] = true;
-                }
-            }
-            $orderIds = array_keys($orderIds);
-
-            if (empty($orderIds)) {
                 return;
             }
 
@@ -337,17 +314,28 @@ class OrderSubscriber implements EventSubscriberInterface
             /** @var OrderEntity $order */
             foreach ($orders as $order) {
                 $deliveries = $order->getDeliveries();
-                $this->sendKarlaOrder($order, $deliveries, $event, true);
+                $this->sendKarlaOrder($order, $deliveries, $skipOrderStatusCheck);
             }
         } catch (\Throwable $t) {
-            $this->logger->error('Unexpected error during order delivery sync', [
-                'component' => 'order.delivery.sync',
+            $this->logger->error('Unexpected error during order sync', [
+                'component' => $component,
                 'error' => $t->getMessage(),
                 'file' => $t->getFile(),
                 'line' => $t->getLine(),
                 'trace' => $t->getTraceAsString(),
             ]);
         }
+    }
+
+    /**
+     * Check if the plugin has valid API configuration
+     */
+    private function isConfigured(): bool
+    {
+        return ! empty($this->shopSlug)
+            && ! empty($this->apiUsername)
+            && ! empty($this->apiKey)
+            && ! empty($this->apiUrl);
     }
 
     /**
@@ -359,7 +347,6 @@ class OrderSubscriber implements EventSubscriberInterface
     private function sendKarlaOrder(
         OrderEntity $order,
         OrderDeliveryCollection $deliveries,
-        EntityWrittenEvent $event,
         bool $skipOrderStatusCheck = false
     ): void {
         $orderNumber = $order->getOrderNumber();

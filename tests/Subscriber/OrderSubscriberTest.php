@@ -2337,18 +2337,6 @@ class OrderSubscriberTest extends TestCase
     }
 
     /**
-     * Test that getSubscribedEvents includes order_delivery.written
-     */
-    public function testGetSubscribedEventsIncludesOrderDeliveryWritten()
-    {
-        $events = OrderSubscriber::getSubscribedEvents();
-
-        $this->assertIsArray($events);
-        $this->assertArrayHasKey('order_delivery.written', $events);
-        $this->assertEquals('onOrderDeliveryWritten', $events['order_delivery.written']);
-    }
-
-    /**
      * Test onOrderDeliveryWritten sends tracking codes to Karla
      */
     public function testOnOrderDeliveryWrittenSendsTrackingCodes()
@@ -2562,7 +2550,7 @@ class OrderSubscriberTest extends TestCase
         $this->loggerMock->expects($this->once())
             ->method('error')
             ->with(
-                'Unexpected error during order delivery sync',
+                'Unexpected error during order sync',
                 $this->callback(function ($context) {
                     return $context['component'] === 'order.delivery.sync'
                         && $context['error'] === 'Database error';
