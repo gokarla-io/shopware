@@ -278,6 +278,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 $deliveryCriteria = new Criteria($deliveryIds);
                 $deliveries = $this->orderDeliveryRepository->search($deliveryCriteria, $event->getContext());
 
+                /** @var \Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryEntity $delivery */
                 foreach ($deliveries as $delivery) {
                     $orderId = $delivery->getOrderId();
                     if ($orderId) {
