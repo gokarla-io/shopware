@@ -253,62 +253,72 @@ class OrderSubscriber implements EventSubscriberInterface
      */
     public function onOrderDeliveryWritten(EntityWrittenEvent $event): void
     {
-        $payloads = $event->getPayloads();
+        try {
+            $payloads = $event->getPayloads();
 
-        if ($this->debugMode) {
-            $this->logger->debug('Received order_delivery.written event', [
-                'component' => 'order.delivery.sync',
-                'payloads' => $payloads,
-            ]);
-        }
-
-        // Extract unique order IDs from the delivery payloads
-        $orderIds = [];
-        foreach ($payloads as $payload) {
-            if (isset($payload['orderId'])) {
-                $orderIds[$payload['orderId']] = true;
+            if ($this->debugMode) {
+                $this->logger->debug('Received order_delivery.written event', [
+                    'component' => 'order.delivery.sync',
+                    'payloads' => $payloads,
+                ]);
             }
-        }
 
-        // When orderId is not in the payload (e.g. ERP PATCH with only trackingCodes),
-        // look up the order IDs from the delivery entities
-        if (empty($orderIds)) {
-            $deliveryIds = $event->getIds();
-            $deliveryCriteria = new Criteria($deliveryIds);
-            $deliveries = $this->orderDeliveryRepository->search($deliveryCriteria, $event->getContext());
-
-            foreach ($deliveries as $delivery) {
-                $orderId = $delivery->getOrderId();
-                if ($orderId) {
-                    $orderIds[$orderId] = true;
+            // Extract unique order IDs from the delivery payloads
+            $orderIds = [];
+            foreach ($payloads as $payload) {
+                if (isset($payload['orderId'])) {
+                    $orderIds[$payload['orderId']] = true;
                 }
             }
 
-            if ($this->debugMode) {
-                $this->logger->debug('Resolved order IDs from delivery entities', [
-                    'component' => 'order.delivery.sync',
-                    'delivery_ids' => $deliveryIds,
-                    'order_ids' => array_keys($orderIds),
-                ]);
+            // When orderId is not in the payload (e.g. ERP PATCH with only trackingCodes),
+            // look up the order IDs from the delivery entities
+            if (empty($orderIds)) {
+                $deliveryIds = $event->getIds();
+                $deliveryCriteria = new Criteria($deliveryIds);
+                $deliveries = $this->orderDeliveryRepository->search($deliveryCriteria, $event->getContext());
+
+                foreach ($deliveries as $delivery) {
+                    $orderId = $delivery->getOrderId();
+                    if ($orderId) {
+                        $orderIds[$orderId] = true;
+                    }
+                }
+
+                if ($this->debugMode) {
+                    $this->logger->debug('Resolved order IDs from delivery entities', [
+                        'component' => 'order.delivery.sync',
+                        'delivery_ids' => $deliveryIds,
+                        'order_ids' => array_keys($orderIds),
+                    ]);
+                }
             }
-        }
 
-        $orderIds = array_keys($orderIds);
+            $orderIds = array_keys($orderIds);
 
-        if (empty($orderIds)) {
-            $this->logger->info('Order delivery sync skipped - no order IDs found', [
+            if (empty($orderIds)) {
+                $this->logger->info('Order delivery sync skipped - no order IDs found', [
+                    'component' => 'order.delivery.sync',
+                ]);
+
+                return;
+            }
+
+            $this->processOrders(
+                $orderIds,
+                $event->getContext(),
+                'order.delivery.sync',
+                true
+            );
+        } catch (\Throwable $t) {
+            $this->logger->error('Unexpected error during order delivery sync', [
                 'component' => 'order.delivery.sync',
+                'error' => $t->getMessage(),
+                'file' => $t->getFile(),
+                'line' => $t->getLine(),
+                'trace' => $t->getTraceAsString(),
             ]);
-
-            return;
         }
-
-        $this->processOrders(
-            $orderIds,
-            $event->getContext(),
-            'order.delivery.sync',
-            true
-        );
     }
 
     /**
