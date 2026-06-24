@@ -73,30 +73,56 @@ class ProductSyncServiceTest extends TestCase
     }
 
     /**
-     * Stub the sales-channel repo to return a single storefront whose domain
-     * resolves to $baseUrl for $languageId.
+     * Stub the sales-channel repo from channel specs. Each spec is
+     * ['id' => string, 'languageId' => string, 'domains' => ?list of
+     * ['languageId' => string, 'url' => string]] (null domains = headless).
+     *
+     * @param array<int, array{id: string, languageId: string, domains: ?array<int, array{languageId: string, url: string}>}> $specs
      */
-    private function stubStorefront(string $baseUrl, string $languageId = 'lang-1'): void
+    private function stubChannels(array $specs): void
     {
-        $domain = $this->createMock(SalesChannelDomainEntity::class);
-        $domain->method('getLanguageId')->willReturn($languageId);
-        $domain->method('getUrl')->willReturn($baseUrl);
+        $channels = [];
+        foreach ($specs as $spec) {
+            $channel = $this->createMock(SalesChannelEntity::class);
+            $channel->method('getId')->willReturn($spec['id']);
+            $channel->method('getLanguageId')->willReturn($spec['languageId']);
 
-        $domains = $this->createMock(SalesChannelDomainCollection::class);
-        $domains->method('count')->willReturn(1);
-        $domains->method('first')->willReturn($domain);
-        $domains->method('getIterator')->willReturn(new \ArrayIterator([$domain]));
+            if ($spec['domains'] === null) {
+                $channel->method('getDomains')->willReturn(null);
+            } else {
+                $domainEntities = [];
+                foreach ($spec['domains'] as $d) {
+                    $domain = $this->createMock(SalesChannelDomainEntity::class);
+                    $domain->method('getLanguageId')->willReturn($d['languageId']);
+                    $domain->method('getUrl')->willReturn($d['url']);
+                    $domainEntities[] = $domain;
+                }
+                $domains = $this->createMock(SalesChannelDomainCollection::class);
+                $domains->method('first')->willReturn($domainEntities[0] ?? null);
+                $domains->method('getIterator')->willReturn(new \ArrayIterator($domainEntities));
+                $channel->method('getDomains')->willReturn($domains);
+            }
 
-        $channel = $this->createMock(SalesChannelEntity::class);
-        $channel->method('getId')->willReturn('sc-1');
-        $channel->method('getLanguageId')->willReturn($languageId);
-        $channel->method('getDomains')->willReturn($domains);
+            $channels[] = $channel;
+        }
 
         $collection = $this->createMock(EntityCollection::class);
-        $collection->method('getElements')->willReturn([$channel]);
+        $collection->method('getElements')->willReturn($channels);
         $result = $this->createMock(EntitySearchResult::class);
         $result->method('getEntities')->willReturn($collection);
         $this->salesChannelRepositoryMock->method('search')->willReturn($result);
+    }
+
+    /**
+     * Stub a single storefront sales channel resolving to $baseUrl for $languageId.
+     */
+    private function stubStorefront(string $baseUrl, string $languageId = 'lang-1'): void
+    {
+        $this->stubChannels([
+            ['id' => 'sc-1', 'languageId' => $languageId, 'domains' => [
+                ['languageId' => $languageId, 'url' => $baseUrl],
+            ]],
+        ]);
     }
 
     /**
@@ -104,11 +130,7 @@ class ProductSyncServiceTest extends TestCase
      */
     private function stubNoStorefront(): void
     {
-        $collection = $this->createMock(EntityCollection::class);
-        $collection->method('getElements')->willReturn([]);
-        $result = $this->createMock(EntitySearchResult::class);
-        $result->method('getEntities')->willReturn($collection);
-        $this->salesChannelRepositoryMock->method('search')->willReturn($result);
+        $this->stubChannels([]);
     }
 
     /**
@@ -211,6 +233,118 @@ class ProductSyncServiceTest extends TestCase
     {
         $this->stubStorefront('https://shop.example.com');
         $this->stubSeoUrls([]); // no SEO URL for this product
+
+        $body = $this->captureUpsertBody(
+            $this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product')
+        );
+
+        $this->assertNull($body['product_url']);
+    }
+
+    public function testUpsertProductUrlNullWhenSeoPathEmpty(): void
+    {
+        $this->stubStorefront('https://shop.example.com');
+        $this->stubSeoUrls(['product-id-123' => '']); // canonical row but blank path
+
+        $body = $this->captureUpsertBody(
+            $this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product')
+        );
+
+        $this->assertNull($body['product_url']);
+    }
+
+    public function testUpsertProductUrlNullWhenChannelHasNoDomains(): void
+    {
+        $this->stubChannels([
+            ['id' => 'sc-1', 'languageId' => 'lang-1', 'domains' => null],
+        ]);
+        $this->stubSeoUrls(['product-id-123' => '/p']);
+
+        $body = $this->captureUpsertBody(
+            $this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product')
+        );
+
+        $this->assertNull($body['product_url']);
+    }
+
+    public function testUpsertProductUrlNullWhenChannelDomainsEmpty(): void
+    {
+        $this->stubChannels([
+            ['id' => 'sc-1', 'languageId' => 'lang-1', 'domains' => []],
+        ]);
+        $this->stubSeoUrls(['product-id-123' => '/p']);
+
+        $body = $this->captureUpsertBody(
+            $this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product')
+        );
+
+        $this->assertNull($body['product_url']);
+    }
+
+    public function testUpsertProductUrlPicksLowestIdWhenMultipleStorefronts(): void
+    {
+        $this->stubChannels([
+            ['id' => 'sc-2', 'languageId' => 'lang-1', 'domains' => [
+                ['languageId' => 'lang-1', 'url' => 'https://b.example.com'],
+            ]],
+            ['id' => 'sc-1', 'languageId' => 'lang-1', 'domains' => [
+                ['languageId' => 'lang-1', 'url' => 'https://a.example.com'],
+            ]],
+        ]);
+        $this->stubSeoUrls(['product-id-123' => '/p']);
+
+        $body = $this->captureUpsertBody(
+            $this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product')
+        );
+
+        $this->assertSame('https://a.example.com/p', $body['product_url']);
+    }
+
+    public function testStorefrontResolutionIsCachedAcrossUpserts(): void
+    {
+        $this->stubStorefront('https://shop.example.com');
+        $this->stubSeoUrls(['product-id-123' => '/p']);
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.shopSlug', null, 'test-shop'],
+            ['KarlaDelivery.config.apiUrl', null, 'https://api.test.com'],
+            ['KarlaDelivery.config.debugMode', null, false],
+            ['KarlaDelivery.config.apiUsername', null, 'user'],
+            ['KarlaDelivery.config.apiKey', null, 'key'],
+            ['KarlaDelivery.config.requestTimeout', null, 10.0],
+        ]);
+
+        $bodies = [];
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn(200);
+        $response->method('getContent')->willReturn('{}');
+        $this->httpClientMock->method('request')->willReturnCallback(
+            function (string $method, string $url, array $options) use (&$bodies, $response): ResponseInterface {
+                $bodies[] = json_decode((string) $options['body'], true);
+
+                return $response;
+            }
+        );
+
+        $this->service->upsertProduct($this->makeStandaloneProduct('product-id-123', 'P-1', 'N1'));
+        $this->service->upsertProduct($this->makeStandaloneProduct('product-id-123', 'P-2', 'N2'));
+
+        $this->assertSame('https://shop.example.com/p', $bodies[1]['product_url']);
+    }
+
+    public function testUpsertProductUrlSkippedWhenNoProductIds(): void
+    {
+        $body = $this->captureUpsertBody(
+            $this->makeStandaloneProduct('', 'PROD-EMPTY', 'Empty Id')
+        );
+
+        $this->assertNull($body['product_url']);
+    }
+
+    public function testUpsertProductUrlFallsBackToNullOnResolutionError(): void
+    {
+        $this->stubStorefront('https://shop.example.com');
+        $this->seoUrlRepositoryMock->method('search')
+            ->willThrowException(new \RuntimeException('boom'));
 
         $body = $this->captureUpsertBody(
             $this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product')
