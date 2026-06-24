@@ -144,6 +144,9 @@ class ProductSyncServiceTest extends TestCase
             ['KarlaDelivery.config.shopSlug', null, 'test-shop'],
             ['KarlaDelivery.config.apiUrl', null, 'https://api.test.com'],
             ['KarlaDelivery.config.debugMode', null, false],
+            ['KarlaDelivery.config.apiUsername', null, 'user'],
+            ['KarlaDelivery.config.apiKey', null, 'key'],
+            ['KarlaDelivery.config.requestTimeout', null, 10.0],
         ]);
 
         $captured = [];

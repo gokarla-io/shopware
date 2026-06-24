@@ -542,17 +542,17 @@ class ProductSyncService
         /** @var array<SalesChannelEntity> $channels */
         $channels = $this->salesChannelRepository->search($criteria, $context)->getEntities()->getElements();
 
-        // Keep only channels that actually have a domain (i.e. storefronts).
-        $storefronts = array_values(array_filter(
-            $channels,
-            static fn (SalesChannelEntity $c) => $c->getDomains() !== null && $c->getDomains()->count() > 0
-        ));
-        usort(
-            $storefronts,
-            static fn (SalesChannelEntity $a, SalesChannelEntity $b) => strcmp($a->getId(), $b->getId())
-        );
+        // A storefront is an active channel with a usable domain. Key by channel
+        // ID so the pick is deterministic across runs.
+        $candidates = [];
+        foreach ($channels as $channel) {
+            $base = $this->buildChannelUrlBase($channel);
+            if ($base !== null) {
+                $candidates[$channel->getId()] = $base;
+            }
+        }
 
-        if (count($storefronts) === 0) {
+        if (count($candidates) === 0) {
             $this->logger->info('No storefront sales channel with a domain found; product URLs will be empty', [
                 'component' => 'product.sync',
             ]);
@@ -560,37 +560,51 @@ class ProductSyncService
             return $this->storefrontUrlBase = null;
         }
 
-        if (count($storefronts) > 1) {
+        ksort($candidates);
+
+        if (count($candidates) > 1) {
             $this->logger->warning('Multiple storefront sales channels found; using the lowest ID for product URLs', [
                 'component' => 'product.sync',
-                'sales_channel_ids' => array_map(static fn (SalesChannelEntity $c) => $c->getId(), $storefronts),
+                'sales_channel_ids' => array_keys($candidates),
             ]);
         }
 
-        $channel = $storefronts[0];
+        /** @var array{baseUrl: string, salesChannelId: string, languageId: string} $first */
+        $first = reset($candidates);
+
+        return $this->storefrontUrlBase = $first;
+    }
+
+    /**
+     * Build the URL base for one sales channel, or null when it has no usable
+     * domain. Prefers the domain matching the channel's default language.
+     *
+     * @return array{baseUrl: string, salesChannelId: string, languageId: string}|null
+     */
+    private function buildChannelUrlBase(SalesChannelEntity $channel): ?array
+    {
         $domains = $channel->getDomains();
+        if ($domains === null) {
+            return null;
+        }
 
-        // Prefer the domain matching the channel's default language, else the first.
-        $chosenDomain = null;
-        if ($domains !== null) {
-            foreach ($domains as $domain) {
-                if ($domain->getLanguageId() === $channel->getLanguageId()) {
-                    $chosenDomain = $domain;
+        $chosen = $domains->first();
+        foreach ($domains as $domain) {
+            if ($domain->getLanguageId() === $channel->getLanguageId()) {
+                $chosen = $domain;
 
-                    break;
-                }
+                break;
             }
-            $chosenDomain ??= $domains->first();
         }
 
-        if ($chosenDomain === null) {
-            return $this->storefrontUrlBase = null;
+        if ($chosen === null) {
+            return null;
         }
 
-        return $this->storefrontUrlBase = [
-            'baseUrl' => rtrim($chosenDomain->getUrl(), '/'),
+        return [
+            'baseUrl' => rtrim((string) $chosen->getUrl(), '/'),
             'salesChannelId' => $channel->getId(),
-            'languageId' => $chosenDomain->getLanguageId(),
+            'languageId' => $chosen->getLanguageId(),
         ];
     }
 
