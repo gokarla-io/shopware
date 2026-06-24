@@ -576,6 +576,7 @@ class ProductSyncService
             foreach ($domains as $domain) {
                 if ($domain->getLanguageId() === $channel->getLanguageId()) {
                     $chosenDomain = $domain;
+
                     break;
                 }
             }
