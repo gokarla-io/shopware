@@ -11,8 +11,13 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Content\Product\ProductCollection;
 use Shopware\Core\Content\Product\ProductEntity;
+use Shopware\Core\Content\Seo\SeoUrl\SeoUrlEntity;
+use Shopware\Core\Framework\DataAbstractionLayer\EntityCollection;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
+use Shopware\Core\System\SalesChannel\Aggregate\SalesChannelDomain\SalesChannelDomainCollection;
+use Shopware\Core\System\SalesChannel\Aggregate\SalesChannelDomain\SalesChannelDomainEntity;
+use Shopware\Core\System\SalesChannel\SalesChannelEntity;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Contracts\HttpClient\ResponseInterface;
@@ -38,6 +43,12 @@ class ProductSyncServiceTest extends TestCase
     /** @var Connection&MockObject */
     private Connection $connectionMock;
 
+    /** @var EntityRepository&MockObject */
+    private EntityRepository $seoUrlRepositoryMock;
+
+    /** @var EntityRepository&MockObject */
+    private EntityRepository $salesChannelRepositoryMock;
+
     private ProductSyncService $service;
 
     protected function setUp(): void
@@ -47,14 +58,162 @@ class ProductSyncServiceTest extends TestCase
         $this->systemConfigServiceMock = $this->createMock(SystemConfigService::class);
         $this->loggerMock = $this->createMock(LoggerInterface::class);
         $this->connectionMock = $this->createMock(Connection::class);
+        $this->seoUrlRepositoryMock = $this->createMock(EntityRepository::class);
+        $this->salesChannelRepositoryMock = $this->createMock(EntityRepository::class);
 
         $this->service = new ProductSyncService(
             $this->productRepositoryMock,
             $this->httpClientMock,
             $this->systemConfigServiceMock,
             $this->loggerMock,
-            $this->connectionMock
+            $this->connectionMock,
+            $this->seoUrlRepositoryMock,
+            $this->salesChannelRepositoryMock
         );
+    }
+
+    /**
+     * Stub the sales-channel repo to return a single storefront whose domain
+     * resolves to $baseUrl for $languageId.
+     */
+    private function stubStorefront(string $baseUrl, string $languageId = 'lang-1'): void
+    {
+        $domain = $this->createMock(SalesChannelDomainEntity::class);
+        $domain->method('getLanguageId')->willReturn($languageId);
+        $domain->method('getUrl')->willReturn($baseUrl);
+
+        $domains = $this->createMock(SalesChannelDomainCollection::class);
+        $domains->method('count')->willReturn(1);
+        $domains->method('first')->willReturn($domain);
+        $domains->method('getIterator')->willReturn(new \ArrayIterator([$domain]));
+
+        $channel = $this->createMock(SalesChannelEntity::class);
+        $channel->method('getId')->willReturn('sc-1');
+        $channel->method('getLanguageId')->willReturn($languageId);
+        $channel->method('getDomains')->willReturn($domains);
+
+        $collection = $this->createMock(EntityCollection::class);
+        $collection->method('getElements')->willReturn([$channel]);
+        $result = $this->createMock(EntitySearchResult::class);
+        $result->method('getEntities')->willReturn($collection);
+        $this->salesChannelRepositoryMock->method('search')->willReturn($result);
+    }
+
+    /**
+     * Stub the sales-channel repo to return no storefront at all.
+     */
+    private function stubNoStorefront(): void
+    {
+        $collection = $this->createMock(EntityCollection::class);
+        $collection->method('getElements')->willReturn([]);
+        $result = $this->createMock(EntitySearchResult::class);
+        $result->method('getEntities')->willReturn($collection);
+        $this->salesChannelRepositoryMock->method('search')->willReturn($result);
+    }
+
+    /**
+     * Stub the seo_url repo to return one canonical URL per (foreignKey => path).
+     *
+     * @param array<string, string> $pathByForeignKey
+     */
+    private function stubSeoUrls(array $pathByForeignKey): void
+    {
+        $entities = [];
+        foreach ($pathByForeignKey as $foreignKey => $path) {
+            $seoUrl = $this->createMock(SeoUrlEntity::class);
+            $seoUrl->method('getForeignKey')->willReturn($foreignKey);
+            $seoUrl->method('getSeoPathInfo')->willReturn($path);
+            $entities[] = $seoUrl;
+        }
+
+        $collection = $this->createMock(EntityCollection::class);
+        $collection->method('getIterator')->willReturn(new \ArrayIterator($entities));
+        $result = $this->createMock(EntitySearchResult::class);
+        $result->method('getEntities')->willReturn($collection);
+        $this->seoUrlRepositoryMock->method('search')->willReturn($result);
+    }
+
+    /**
+     * Drive upsertProduct and capture the JSON body sent to Karla.
+     *
+     * @return array<string, mixed>
+     */
+    private function captureUpsertBody(ProductEntity $product): array
+    {
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.shopSlug', null, 'test-shop'],
+            ['KarlaDelivery.config.apiUrl', null, 'https://api.test.com'],
+            ['KarlaDelivery.config.debugMode', null, false],
+        ]);
+
+        $captured = [];
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn(200);
+        $response->method('getContent')->willReturn('{}');
+
+        $this->httpClientMock->method('request')->willReturnCallback(
+            function (string $method, string $url, array $options) use (&$captured, $response): ResponseInterface {
+                $captured = json_decode((string) $options['body'], true);
+
+                return $response;
+            }
+        );
+
+        $this->service->upsertProduct($product);
+
+        return $captured;
+    }
+
+    private function makeStandaloneProduct(string $id, string $number, string $name): ProductEntity
+    {
+        $product = $this->createMock(ProductEntity::class);
+        $product->method('getProductNumber')->willReturn($number);
+        $product->method('getName')->willReturn($name);
+        $product->method('getId')->willReturn($id);
+        $product->method('getParentId')->willReturn(null);
+        $product->method('getChildCount')->willReturn(0);
+        $product->method('getActive')->willReturn(true);
+        $product->method('getPrice')->willReturn(null);
+        $product->method('getCover')->willReturn(null);
+        $product->method('getTranslations')->willReturn(null);
+
+        return $product;
+    }
+
+    public function testUpsertProductIncludesResolvedProductUrl(): void
+    {
+        $this->stubStorefront('https://shop.example.com/');
+        $this->stubSeoUrls(['product-id-123' => '/Cool-Product/SW100']);
+
+        $body = $this->captureUpsertBody(
+            $this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product')
+        );
+
+        $this->assertSame('https://shop.example.com/Cool-Product/SW100', $body['product_url']);
+    }
+
+    public function testUpsertProductUrlNullWhenNoStorefront(): void
+    {
+        $this->stubNoStorefront();
+
+        $body = $this->captureUpsertBody(
+            $this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product')
+        );
+
+        $this->assertArrayHasKey('product_url', $body);
+        $this->assertNull($body['product_url']);
+    }
+
+    public function testUpsertProductUrlNullWhenNoCanonicalSeoUrl(): void
+    {
+        $this->stubStorefront('https://shop.example.com');
+        $this->stubSeoUrls([]); // no SEO URL for this product
+
+        $body = $this->captureUpsertBody(
+            $this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product')
+        );
+
+        $this->assertNull($body['product_url']);
     }
 
     public function testSyncProductBatchWithProducts(): void

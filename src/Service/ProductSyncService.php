@@ -7,10 +7,13 @@ namespace Karla\Delivery\Service;
 use Doctrine\DBAL\Connection;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Content\Product\ProductEntity;
+use Shopware\Core\Content\Seo\SeoUrl\SeoUrlEntity;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsAnyFilter;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
+use Shopware\Core\System\SalesChannel\SalesChannelEntity;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -24,6 +27,17 @@ class ProductSyncService
     private array $parentMap = [];
 
     /**
+     * Cached storefront URL base (baseUrl, salesChannelId, languageId) used to
+     * build product URLs, or null when none is resolvable. Resolved once per
+     * service instance.
+     *
+     * @var array{baseUrl: string, salesChannelId: string, languageId: string}|null
+     */
+    private ?array $storefrontUrlBase = null;
+
+    private bool $storefrontResolved = false;
+
+    /**
      * @codeCoverageIgnore Simple dependency injection constructor
      */
     public function __construct(
@@ -31,7 +45,9 @@ class ProductSyncService
         private HttpClientInterface $httpClient,
         private SystemConfigService $systemConfigService,
         private LoggerInterface $logger,
-        private Connection $connection
+        private Connection $connection,
+        private EntityRepository $seoUrlRepository,
+        private EntityRepository $salesChannelRepository
     ) {
     }
 
@@ -350,8 +366,14 @@ class ProductSyncService
                 $this->parentMap[$parent->getId()] = $parent;
             }
 
+            // Resolve canonical product URL (variant's own SEO URL, else parent's)
+            $urlMap = $this->resolveProductUrls([$product->getId(), $product->getParentId()]);
+
             // Build variant payload
-            $variantPayload = $this->buildVariantPayload($product);
+            $variantPayload = $this->buildVariantPayload(
+                $product,
+                $this->lookupProductUrl($urlMap, $product)
+            );
 
             $karlaProductId = $variantPayload['product_id'];
             $karlaVariantId = $variantPayload['variant_id'];
@@ -408,11 +430,24 @@ class ProductSyncService
             throw new \RuntimeException('Missing required config (shopSlug or apiUrl)');
         }
 
+        // Resolve canonical product URLs for the whole batch in one query.
+        // Collect both the variant's own ID and its parent ID, since a variant's
+        // SEO URL may live under either.
+        $idsForUrls = [];
+        foreach ($products as $product) {
+            $idsForUrls[] = $product->getId();
+            $idsForUrls[] = $product->getParentId();
+        }
+        $urlMap = $this->resolveProductUrls($idsForUrls);
+
         // Build array of variant payloads
         // buildVariantPayload() is fully defensive and cannot throw
         $variantPayloads = [];
         foreach ($products as $product) {
-            $variantPayloads[] = $this->buildVariantPayload($product);
+            $variantPayloads[] = $this->buildVariantPayload(
+                $product,
+                $this->lookupProductUrl($urlMap, $product)
+            );
         }
 
         if ($debugMode) {
@@ -428,9 +463,154 @@ class ProductSyncService
     }
 
     /**
+     * Resolve canonical storefront product URLs for the given product IDs.
+     *
+     * Returns a map of product/variant ID => absolute product URL. IDs without a
+     * canonical SEO URL (or when no storefront is configured) are simply absent,
+     * so callers fall back to null — never worse than the previous behaviour.
+     * Fully defensive: any failure degrades to an empty map, never throws.
+     *
+     * @param array<int, string|null> $productIds
+     * @return array<string, string>
+     */
+    private function resolveProductUrls(array $productIds): array
+    {
+        $ids = array_values(array_unique(array_filter($productIds)));
+        if (count($ids) === 0) {
+            return [];
+        }
+
+        try {
+            $context = Context::createDefaultContext();
+
+            $base = $this->resolveStorefrontUrlBase($context);
+            if ($base === null) {
+                return [];
+            }
+
+            $criteria = new Criteria();
+            $criteria->addFilter(new EqualsFilter('routeName', 'frontend.detail.page'));
+            $criteria->addFilter(new EqualsFilter('salesChannelId', $base['salesChannelId']));
+            $criteria->addFilter(new EqualsFilter('languageId', $base['languageId']));
+            $criteria->addFilter(new EqualsFilter('isCanonical', true));
+            $criteria->addFilter(new EqualsFilter('isDeleted', false));
+            $criteria->addFilter(new EqualsAnyFilter('foreignKey', $ids));
+
+            $urls = [];
+            /** @var SeoUrlEntity $seoUrl */
+            foreach ($this->seoUrlRepository->search($criteria, $context)->getEntities() as $seoUrl) {
+                $path = ltrim((string) $seoUrl->getSeoPathInfo(), '/');
+                if ($path === '') {
+                    continue;
+                }
+                $urls[$seoUrl->getForeignKey()] = $base['baseUrl'] . '/' . $path;
+            }
+
+            return $urls;
+        } catch (\Throwable $t) {
+            $this->logger->warning('Failed to resolve product URLs; falling back to null', [
+                'component' => 'product.sync',
+                'error' => $t->getMessage(),
+            ]);
+
+            return [];
+        }
+    }
+
+    /**
+     * Auto-detect the storefront sales channel to build product URLs against.
+     *
+     * Picks the active sales channel that has a configured domain (a storefront).
+     * With a single storefront — the common case — this needs no configuration.
+     * With several it picks deterministically (lowest ID) and logs a warning, so
+     * a mis-pick is visible rather than silent. The chosen domain prefers the
+     * channel's default language. Result is cached for the service instance.
+     *
+     * @return array{baseUrl: string, salesChannelId: string, languageId: string}|null
+     */
+    private function resolveStorefrontUrlBase(Context $context): ?array
+    {
+        if ($this->storefrontResolved) {
+            return $this->storefrontUrlBase;
+        }
+        $this->storefrontResolved = true;
+
+        $criteria = new Criteria();
+        $criteria->addFilter(new EqualsFilter('active', true));
+        $criteria->addAssociation('domains');
+
+        /** @var array<SalesChannelEntity> $channels */
+        $channels = $this->salesChannelRepository->search($criteria, $context)->getEntities()->getElements();
+
+        // Keep only channels that actually have a domain (i.e. storefronts).
+        $storefronts = array_values(array_filter(
+            $channels,
+            static fn (SalesChannelEntity $c) => $c->getDomains() !== null && $c->getDomains()->count() > 0
+        ));
+        usort(
+            $storefronts,
+            static fn (SalesChannelEntity $a, SalesChannelEntity $b) => strcmp($a->getId(), $b->getId())
+        );
+
+        if (count($storefronts) === 0) {
+            $this->logger->info('No storefront sales channel with a domain found; product URLs will be empty', [
+                'component' => 'product.sync',
+            ]);
+
+            return $this->storefrontUrlBase = null;
+        }
+
+        if (count($storefronts) > 1) {
+            $this->logger->warning('Multiple storefront sales channels found; using the lowest ID for product URLs', [
+                'component' => 'product.sync',
+                'sales_channel_ids' => array_map(static fn (SalesChannelEntity $c) => $c->getId(), $storefronts),
+            ]);
+        }
+
+        $channel = $storefronts[0];
+        $domains = $channel->getDomains();
+
+        // Prefer the domain matching the channel's default language, else the first.
+        $chosenDomain = null;
+        if ($domains !== null) {
+            foreach ($domains as $domain) {
+                if ($domain->getLanguageId() === $channel->getLanguageId()) {
+                    $chosenDomain = $domain;
+                    break;
+                }
+            }
+            $chosenDomain ??= $domains->first();
+        }
+
+        if ($chosenDomain === null) {
+            return $this->storefrontUrlBase = null;
+        }
+
+        return $this->storefrontUrlBase = [
+            'baseUrl' => rtrim($chosenDomain->getUrl(), '/'),
+            'salesChannelId' => $channel->getId(),
+            'languageId' => $chosenDomain->getLanguageId(),
+        ];
+    }
+
+    /**
+     * Pick the resolved URL for a product: prefer the variant's own SEO URL,
+     * fall back to its parent's.
+     *
+     * @param array<string, string> $urlMap
+     */
+    private function lookupProductUrl(array $urlMap, ProductEntity $product): ?string
+    {
+        $parentId = $product->getParentId();
+
+        return $urlMap[$product->getId()]
+            ?? ($parentId !== null ? ($urlMap[$parentId] ?? null) : null);
+    }
+
+    /**
      * Build product variant payload for Karla API
      */
-    private function buildVariantPayload(ProductEntity $product): array
+    private function buildVariantPayload(ProductEntity $product, ?string $productUrl = null): array
     {
         // Determine product_id and variant_id
         // For Shopware: parent ID is the container, product ID is the variant
@@ -474,7 +654,7 @@ class ProductSyncService
             'variant_title' => $parentId ? $variantName : null,  // Variant name if it's a variant, null otherwise
             'price' => $price,
             'sku' => $product->getProductNumber(),
-            'product_url' => null,  // Shopware doesn't expose product URLs in entity
+            'product_url' => $productUrl,  // resolved canonical storefront SEO URL; null when unavailable
         ];
 
         // Add cover image if available
