@@ -6,6 +6,7 @@ namespace Karla\Delivery\Event;
 
 use Shopware\Core\Checkout\Customer\CustomerDefinition;
 use Shopware\Core\Checkout\Order\OrderDefinition;
+use Shopware\Core\Checkout\Order\OrderException;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\Event\CustomerAware;
 use Shopware\Core\Framework\Event\EventData\EntityType;
@@ -280,14 +281,24 @@ class KarlaWebhookEvent extends Event implements FlowEventAware, MailAware, Orde
      * Get customer ID from webhook context.
      * Karla webhooks include the customer ID in context.customer.external_id
      *
-     * @throws \RuntimeException if customer ID not found in webhook payload
+     * Guest orders have no registered customer, so external_id is null. In that case we throw
+     * CustomerDeletedException (via OrderException::orderCustomerDeleted), which is the exact
+     * exception Shopware's CustomerStorer catches and swallows during flow creation. This mirrors
+     * how Shopware core events (e.g. CheckoutOrderPlacedEvent, OrderStateMachineStateChangeEvent)
+     * handle customerless orders: the flow still runs with OrderAware + MailAware data, it just
+     * skips storing a customer entity. Throwing any other exception type here would abort the
+     * whole flow dispatch and fail the webhook (HTTP 500).
+     *
+     * @throws \Shopware\Core\Content\Flow\Exception\CustomerDeletedException if no customer is available
      */
     public function getCustomerId(): string
     {
         $customerId = $this->webhookData['context']['customer']['external_id'] ?? null;
 
         if (! $customerId || ! is_string($customerId)) {
-            throw new \RuntimeException('Customer ID not found in webhook context. Required for CustomerAware actions.');
+            $orderId = $this->webhookData['context']['order']['external_id'] ?? null;
+
+            throw OrderException::orderCustomerDeleted(is_string($orderId) ? $orderId : 'unknown');
         }
 
         return $customerId;
