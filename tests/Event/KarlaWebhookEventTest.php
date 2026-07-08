@@ -7,6 +7,7 @@ namespace Karla\Delivery\Tests\Event;
 use Karla\Delivery\Event\KarlaWebhookEvent;
 use Karla\Delivery\Tests\Fixtures\KarlaWebhookPayloads;
 use PHPUnit\Framework\TestCase;
+use Shopware\Core\Content\Flow\Exception\CustomerDeletedException;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\Event\EventData\EventDataCollection;
 use Shopware\Core\Framework\Event\EventData\MailRecipientStruct;
@@ -401,9 +402,13 @@ final class KarlaWebhookEventTest extends TestCase
     }
 
     /**
+     * A missing customer (e.g. guest order) must throw CustomerDeletedException specifically,
+     * because that is the only exception Shopware's CustomerStorer catches during flow creation.
+     * Any other exception type would abort the whole flow dispatch and fail the webhook.
+     *
      * @covers ::getCustomerId
      */
-    public function testGetCustomerIdThrowsExceptionWhenMissing(): void
+    public function testGetCustomerIdThrowsCustomerDeletedExceptionWhenMissing(): void
     {
         // Arrange: Payload without customer context
         $webhookData = ['event_group' => 'shipment_in_transit', 'event_data' => []];
@@ -411,15 +416,14 @@ final class KarlaWebhookEventTest extends TestCase
 
         // Act & Assert
         $event = new KarlaWebhookEvent($webhookData, $context);
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Customer ID not found in webhook context. Required for CustomerAware actions.');
+        $this->expectException(CustomerDeletedException::class);
         $event->getCustomerId();
     }
 
     /**
      * @covers ::getCustomerId
      */
-    public function testGetCustomerIdThrowsExceptionWhenNotString(): void
+    public function testGetCustomerIdThrowsCustomerDeletedExceptionWhenNotString(): void
     {
         // Arrange: Payload with non-string customer ID
         $webhookData = [
@@ -431,8 +435,30 @@ final class KarlaWebhookEventTest extends TestCase
 
         // Act & Assert
         $event = new KarlaWebhookEvent($webhookData, $context);
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Customer ID not found in webhook context. Required for CustomerAware actions.');
+        $this->expectException(CustomerDeletedException::class);
+        $event->getCustomerId();
+    }
+
+    /**
+     * Guest order regression: the customer object is present with an email but external_id is null.
+     * getCustomerId() must throw CustomerDeletedException (swallowed by CustomerStorer) so the flow
+     * still runs, and the guest email is still available for MailAware actions via getMailStruct().
+     *
+     * @covers ::getCustomerId
+     * @covers ::getMailStruct
+     */
+    public function testGuestOrderIsHandledGracefully(): void
+    {
+        // Arrange
+        $context = Context::createDefaultContext();
+        $event = new KarlaWebhookEvent(KarlaWebhookPayloads::shipmentGuest(), $context);
+
+        // Assert: order id and guest email remain usable for OrderAware/MailAware actions
+        $this->assertEquals('order-456', $event->getOrderId());
+        $this->assertArrayHasKey('guest@example.com', $event->getMailStruct()->getRecipients());
+
+        // Assert: customer id lookup throws the storer-swallowed exception
+        $this->expectException(CustomerDeletedException::class);
         $event->getCustomerId();
     }
 }

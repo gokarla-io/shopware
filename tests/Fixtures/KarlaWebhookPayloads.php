@@ -45,6 +45,26 @@ final class KarlaWebhookPayloads
     }
 
     /**
+     * Shipment webhook for a guest order: the customer object is present (email/name) but has no
+     * external_id, because guest checkouts have no registered Shopware customer.
+     *
+     * @return array<string, mixed>
+     */
+    public static function shipmentGuest(): array
+    {
+        $payload = self::shipment();
+        $payload['context']['order']['external_customer_id'] = null;
+        $payload['context']['customer'] = [
+            'external_id' => null,
+            'email' => 'guest@example.com',
+            'first_name' => 'Guest',
+            'last_name' => 'Shopper',
+        ];
+
+        return $payload;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public static function claim(): array
