@@ -1,0 +1,37 @@
+# Dependabot configuration.
+#
+# Keeps the committed composer.lock (CI/dev only — it is NOT shipped in the
+# plugin ZIP, which contains just src/ + composer.json) and the GitHub Actions
+# fresh. Updates are grouped into a single weekly PR per ecosystem to avoid an
+# alert backlog, and use a `chore(deps)` prefix so they don't trigger releases.
+version: 2
+updates:
+  - package-ecosystem: "composer"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      composer-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
