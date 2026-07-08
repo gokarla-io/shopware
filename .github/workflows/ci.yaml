@@ -17,7 +17,7 @@ jobs:
         php-version: ["8.3"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -28,7 +28,7 @@ jobs:
           ini-values: memory_limit=512M
 
       - name: Cache Composer packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: vendor
           key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
@@ -53,7 +53,7 @@ jobs:
       - name: Create Release
         if: github.ref == 'refs/heads/main'
         id: create_release
-        uses: darioblanco/release-wizard@v2
+        uses: darioblanco/release-wizard@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
