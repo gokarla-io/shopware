@@ -44,6 +44,9 @@
   "config": {
     "allow-plugins": {
       "symfony/runtime": true
+    },
+    "platform": {
+      "php": "8.3.2"
     }
   }
 }
