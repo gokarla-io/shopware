@@ -8,11 +8,13 @@ use Doctrine\DBAL\Connection;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Content\Product\ProductEntity;
 use Shopware\Core\Content\Seo\SeoUrl\SeoUrlEntity;
+use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsAnyFilter;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\OrFilter;
 use Shopware\Core\System\SalesChannel\SalesChannelEntity;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -352,6 +354,62 @@ class ProductSyncService
     public function upsertProduct(ProductEntity $product, ?ProductEntity $parent = null): void
     {
         try {
+            // Resolve canonical product URL (variant's own SEO URL, else parent's)
+            $urlMap = $this->resolveProductUrls([$product->getId(), $product->getParentId()]);
+        } catch (\Throwable) {
+            // Entity getters can throw on partially hydrated entities; keep the
+            // never-throws contract and degrade to "resolution unavailable"
+            $urlMap = null;
+        }
+
+        $this->upsertProductWithUrlMap($product, $parent, $urlMap);
+    }
+
+    /**
+     * Upsert several products/variants in one call, resolving all product URLs
+     * with a single batched SEO query (avoids N+1 queries on multi-variant writes).
+     * Never throws - errors are logged only to prevent blocking Shopware operations
+     *
+     * @param array<ProductEntity> $products
+     * @param ProductEntity|null $parent Optional shared parent (when syncing variants)
+     */
+    public function upsertProducts(array $products, ?ProductEntity $parent = null): void
+    {
+        if (count($products) === 0) {
+            return;
+        }
+
+        try {
+            $idsForUrls = [];
+            foreach ($products as $product) {
+                $idsForUrls[] = $product->getId();
+                $idsForUrls[] = $product->getParentId();
+            }
+            if ($parent !== null) {
+                $idsForUrls[] = $parent->getId();
+            }
+            $urlMap = $this->resolveProductUrls($idsForUrls);
+        } catch (\Throwable) {
+            // Entity getters can throw on partially hydrated entities; keep the
+            // never-throws contract and degrade to "resolution unavailable"
+            $urlMap = null;
+        }
+
+        foreach ($products as $product) {
+            $this->upsertProductWithUrlMap($product, $parent, $urlMap);
+        }
+    }
+
+    /**
+     * @param array<string, string>|null $urlMap Resolved URL map, or null when
+     *        resolution was unavailable (product_url omitted from the payload)
+     */
+    private function upsertProductWithUrlMap(
+        ProductEntity $product,
+        ?ProductEntity $parent,
+        ?array $urlMap
+    ): void {
+        try {
             $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug');
             $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl');
             $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode') ?? false;
@@ -366,14 +424,8 @@ class ProductSyncService
                 $this->parentMap[$parent->getId()] = $parent;
             }
 
-            // Resolve canonical product URL (variant's own SEO URL, else parent's)
-            $urlMap = $this->resolveProductUrls([$product->getId(), $product->getParentId()]);
-
             // Build variant payload
-            $variantPayload = $this->buildVariantPayload(
-                $product,
-                $this->lookupProductUrl($urlMap, $product)
-            );
+            $variantPayload = $this->buildVariantPayload($product, $urlMap);
 
             $karlaProductId = $variantPayload['product_id'];
             $karlaVariantId = $variantPayload['variant_id'];
@@ -444,10 +496,7 @@ class ProductSyncService
         // buildVariantPayload() is fully defensive and cannot throw
         $variantPayloads = [];
         foreach ($products as $product) {
-            $variantPayloads[] = $this->buildVariantPayload(
-                $product,
-                $this->lookupProductUrl($urlMap, $product)
-            );
+            $variantPayloads[] = $this->buildVariantPayload($product, $urlMap);
         }
 
         if ($debugMode) {
@@ -465,19 +514,22 @@ class ProductSyncService
     /**
      * Resolve canonical storefront product URLs for the given product IDs.
      *
-     * Returns a map of product/variant ID => absolute product URL. IDs without a
-     * canonical SEO URL (or when no storefront is configured) are simply absent,
-     * so callers fall back to null — never worse than the previous behaviour.
-     * Fully defensive: any failure degrades to an empty map, never throws.
+     * Returns a map of product/variant ID => absolute product URL when
+     * resolution succeeded; IDs without a canonical SEO URL are simply absent,
+     * so callers send product_url: null (the product genuinely has no URL).
+     * Returns NULL when resolution is unavailable (no storefront, query error):
+     * callers then omit product_url entirely, so a degraded sync can never
+     * erase URLs already stored in Karla. Fully defensive: never throws.
      *
      * @param array<int, string|null> $productIds
-     * @return array<string, string>
+     * @return array<string, string>|null
      */
-    private function resolveProductUrls(array $productIds): array
+    private function resolveProductUrls(array $productIds): ?array
     {
         $ids = array_values(array_unique(array_filter($productIds)));
         if (count($ids) === 0) {
-            return [];
+            // No usable IDs: resolution is unavailable, not "resolved to nothing"
+            return null;
         }
 
         try {
@@ -485,12 +537,18 @@ class ProductSyncService
 
             $base = $this->resolveStorefrontUrlBase($context);
             if ($base === null) {
-                return [];
+                return null;
             }
 
             $criteria = new Criteria();
             $criteria->addFilter(new EqualsFilter('routeName', 'frontend.detail.page'));
-            $criteria->addFilter(new EqualsFilter('salesChannelId', $base['salesChannelId']));
+            // Match channel-specific rows AND "all sales channels" rows: admin-edited
+            // SEO paths applied to every channel are stored with a NULL salesChannelId
+            // (mirrors core SeoResolver's `sales_channel_id = ? OR IS NULL`).
+            $criteria->addFilter(new OrFilter([
+                new EqualsFilter('salesChannelId', $base['salesChannelId']),
+                new EqualsFilter('salesChannelId', null),
+            ]));
             $criteria->addFilter(new EqualsFilter('languageId', $base['languageId']));
             $criteria->addFilter(new EqualsFilter('isCanonical', true));
             $criteria->addFilter(new EqualsFilter('isDeleted', false));
@@ -503,17 +561,22 @@ class ProductSyncService
                 if ($path === '') {
                     continue;
                 }
-                $urls[$seoUrl->getForeignKey()] = $base['baseUrl'] . '/' . $path;
+                $foreignKey = $seoUrl->getForeignKey();
+                // Prefer the channel-specific row when both exist (core behaviour)
+                if (isset($urls[$foreignKey]) && $seoUrl->getSalesChannelId() === null) {
+                    continue;
+                }
+                $urls[$foreignKey] = $base['baseUrl'] . '/' . $path;
             }
 
             return $urls;
         } catch (\Throwable $t) {
-            $this->logger->warning('Failed to resolve product URLs; falling back to null', [
+            $this->logger->warning('Failed to resolve product URLs; omitting product_url', [
                 'component' => 'product.sync',
                 'error' => $t->getMessage(),
             ]);
 
-            return [];
+            return null;
         }
     }
 
@@ -533,14 +596,22 @@ class ProductSyncService
         if ($this->storefrontResolved) {
             return $this->storefrontUrlBase;
         }
-        $this->storefrontResolved = true;
 
         $criteria = new Criteria();
         $criteria->addFilter(new EqualsFilter('active', true));
+        // Only storefront channels get product SEO URLs generated. API/headless
+        // and comparison-feed channels with a configured domain must never win
+        // the pick: their SEO lookup would silently null every product_url.
+        $criteria->addFilter(new EqualsFilter('typeId', Defaults::SALES_CHANNEL_TYPE_STOREFRONT));
         $criteria->addAssociation('domains');
 
         /** @var array<SalesChannelEntity> $channels */
         $channels = $this->salesChannelRepository->search($criteria, $context)->getEntities()->getElements();
+
+        // Mark resolved only after a successful query: a transient failure throws
+        // to the caller and is retried on the next call, instead of being cached
+        // as "no storefront" for the lifetime of the service instance.
+        $this->storefrontResolved = true;
 
         // A storefront is an active channel with a usable domain. Key by channel
         // ID so the pick is deterministic across runs.
@@ -553,14 +624,14 @@ class ProductSyncService
         }
 
         if (count($candidates) === 0) {
-            $this->logger->info('No storefront sales channel with a domain found; product URLs will be empty', [
+            $this->logger->info('No storefront sales channel with a domain found; product_url will be omitted', [
                 'component' => 'product.sync',
             ]);
 
             return $this->storefrontUrlBase = null;
         }
 
-        ksort($candidates);
+        ksort($candidates, SORT_STRING);
 
         if (count($candidates) > 1) {
             $this->logger->warning('Multiple storefront sales channels found; using the lowest ID for product URLs', [
@@ -601,8 +672,15 @@ class ProductSyncService
             return null;
         }
 
+        // A domain without a usable URL cannot produce absolute product URLs;
+        // treat it like no domain at all rather than emitting relative URLs.
+        $baseUrl = rtrim((string) $chosen->getUrl(), '/');
+        if ($baseUrl === '') {
+            return null;
+        }
+
         return [
-            'baseUrl' => rtrim((string) $chosen->getUrl(), '/'),
+            'baseUrl' => $baseUrl,
             'salesChannelId' => $channel->getId(),
             'languageId' => $chosen->getLanguageId(),
         ];
@@ -624,8 +702,11 @@ class ProductSyncService
 
     /**
      * Build product variant payload for Karla API
+     *
+     * @param array<string, string>|null $urlMap Resolved product URLs, or null
+     *        when resolution was unavailable (product_url omitted entirely)
      */
-    private function buildVariantPayload(ProductEntity $product, ?string $productUrl = null): array
+    private function buildVariantPayload(ProductEntity $product, ?array $urlMap): array
     {
         // Determine product_id and variant_id
         // For Shopware: parent ID is the container, product ID is the variant
@@ -669,8 +750,15 @@ class ProductSyncService
             'variant_title' => $parentId ? $variantName : null,  // Variant name if it's a variant, null otherwise
             'price' => $price,
             'sku' => $product->getProductNumber(),
-            'product_url' => $productUrl,  // resolved canonical storefront SEO URL; null when unavailable
         ];
+
+        // product_url: resolved canonical storefront SEO URL. When the URL map is
+        // null, resolution was unavailable — omit the key entirely so a degraded
+        // sync can never erase a URL already stored in Karla (an explicit null
+        // clears it; absence means "no change").
+        if ($urlMap !== null) {
+            $payload['product_url'] = $this->lookupProductUrl($urlMap, $product);
+        }
 
         // Add cover image if available
         // Try variant's own cover first, then fallback to parent's cover
