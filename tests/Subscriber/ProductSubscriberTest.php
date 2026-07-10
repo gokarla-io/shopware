@@ -139,9 +139,11 @@ final class ProductSubscriberTest extends TestCase
             ->method('search')
             ->willReturn($searchResult);
 
+        // Standalone products are synced in ONE batched call
         $this->productSyncServiceMock->expects($this->once())
-            ->method('upsertProduct')
-            ->with($product);
+            ->method('upsertProducts')
+            ->with([$product]);
+        $this->productSyncServiceMock->expects($this->never())->method('upsertProduct');
 
         $this->loggerMock->expects($this->once())
             ->method('info')
@@ -184,6 +186,7 @@ final class ProductSubscriberTest extends TestCase
 
         // Should not sync
         $this->productSyncServiceMock->expects($this->never())->method('upsertProduct');
+        $this->productSyncServiceMock->expects($this->never())->method('upsertProducts');
 
         $event = $this->createMock(EntityWrittenEvent::class);
         $event->method('getContext')->willReturn(Context::createDefaultContext());
@@ -389,13 +392,17 @@ final class ProductSubscriberTest extends TestCase
             ->method('search')
             ->willReturnOnConsecutiveCalls($parentSearchResult, $variantSearchResult);
 
-        // Should sync both variants (not the parent)
+        // Should sync both variants (not the parent) in ONE batched call,
+        // so product URLs resolve with a single SEO query instead of N
         $syncedProducts = [];
-        $this->productSyncServiceMock->expects($this->exactly(2))
-            ->method('upsertProduct')
-            ->willReturnCallback(function ($product) use (&$syncedProducts) {
-                $syncedProducts[] = $product;
+        $syncedParent = null;
+        $this->productSyncServiceMock->expects($this->once())
+            ->method('upsertProducts')
+            ->willReturnCallback(function (array $products, $parent) use (&$syncedProducts, &$syncedParent) {
+                $syncedProducts = $products;
+                $syncedParent = $parent;
             });
+        $this->productSyncServiceMock->expects($this->never())->method('upsertProduct');
 
         $this->loggerMock->expects($this->atLeast(1))
             ->method('debug');
@@ -415,10 +422,11 @@ final class ProductSubscriberTest extends TestCase
 
         $this->subscriber->onProductWritten($event);
 
-        // Assert both variants were synced
+        // Assert both variants were synced with their parent
         $this->assertCount(2, $syncedProducts);
         $this->assertSame($variant1, $syncedProducts[0]);
         $this->assertSame($variant2, $syncedProducts[1]);
+        $this->assertSame($parentProduct, $syncedParent);
 
         // Assert both variants were logged
         $this->assertCount(2, $loggedVariants);
