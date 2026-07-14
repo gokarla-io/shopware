@@ -13,6 +13,7 @@ use Shopware\Core\Checkout\Order\Aggregate\OrderCustomer\OrderCustomerEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemCollection;
 use Shopware\Core\Checkout\Order\OrderEntity;
+use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\Country\Aggregate\CountryState\CountryStateEntity;
 use Shopware\Core\System\Country\CountryEntity;
@@ -52,6 +53,9 @@ trait OrderMockBuilderTrait
      * @param bool $includeAddress Whether to include address (default: true)
      * @param bool|null $isGuestCustomer Whether the customer is a guest (null = no customer)
      * @param string|null $customerId Customer ID to use (auto-generated if not provided)
+     * @param \DateTimeInterface|null $createdAt Row createdAt (default: 2020-01-01 10:00:00)
+     * @param \DateTimeInterface|null $orderDateTime Business order date (default: 2020-01-01 10:00:00)
+     * @param string|null $versionId Entity versionId (default: Defaults::LIVE_VERSION)
      * @return \PHPUnit\Framework\MockObject\MockObject&OrderEntity
      */
     protected function createOrderMock(
@@ -66,16 +70,22 @@ trait OrderMockBuilderTrait
         ?OrderLineItemCollection $lineItems = null,
         bool $includeAddress = true,
         ?bool $isGuestCustomer = null,
-        ?string $customerId = null
+        ?string $customerId = null,
+        ?\DateTimeInterface $createdAt = null,
+        ?\DateTimeInterface $orderDateTime = null,
+        ?string $versionId = null
     ): OrderEntity {
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn($versionId ?? Defaults::LIVE_VERSION);
 
         // Basic properties
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn($orderNumber);
         $orderEntity->method('getAmountTotal')->willReturn($totalAmount);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
-        $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getCreatedAt')->willReturn($createdAt ?? new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')
+            ->willReturn($orderDateTime ?? new \DateTimeImmutable('2020-01-01 10:00:00'));
         $orderEntity->method('getSalesChannelId')->willReturn(Uuid::randomHex());
 
         // Status
