@@ -15,6 +15,7 @@ use Shopware\Core\Checkout\Order\OrderEvents;
 use Shopware\Core\Content\Media\MediaEntity;
 use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
 use Shopware\Core\Content\Product\ProductEntity;
+use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
@@ -237,8 +238,29 @@ class OrderSubscriber implements EventSubscriberInterface
      */
     public function onOrderWritten(EntityWrittenEvent $event): void
     {
+        // Shopware creates a draft "version copy" of an order while it is being
+        // edited in the admin. Those writes fire order.written too, but the
+        // draft row's metadata (e.g. createdAt) does not reflect the real
+        // order, so only live-version writes should be synced to Karla.
+        $liveOrderIds = [];
+        foreach ($event->getWriteResults() as $writeResult) {
+            $payload = $writeResult->getPayload();
+            $versionId = $payload['versionId'] ?? Defaults::LIVE_VERSION;
+            if ($versionId === Defaults::LIVE_VERSION) {
+                $liveOrderIds[] = $writeResult->getPrimaryKey();
+            }
+        }
+
+        if (empty($liveOrderIds)) {
+            $this->logger->info('Order sync skipped - no live version writes', [
+                'component' => 'order.sync',
+            ]);
+
+            return;
+        }
+
         $this->processOrders(
-            $event->getIds(),
+            $liveOrderIds,
             $event->getContext(),
             'order.sync',
             false
@@ -254,28 +276,41 @@ class OrderSubscriber implements EventSubscriberInterface
     public function onOrderDeliveryWritten(EntityWrittenEvent $event): void
     {
         try {
-            $payloads = $event->getPayloads();
-
             if ($this->debugMode) {
                 $this->logger->debug('Received order_delivery.written event', [
                     'component' => 'order.delivery.sync',
-                    'payloads' => $payloads,
+                    'payloads' => $event->getPayloads(),
                 ]);
             }
 
-            // Extract unique order IDs from the delivery payloads
+            // Extract unique order IDs from the delivery payloads, skipping
+            // draft "version copy" writes (see onOrderWritten for context)
             $orderIds = [];
-            foreach ($payloads as $payload) {
+            $liveDeliveryIds = [];
+            foreach ($event->getWriteResults() as $writeResult) {
+                $payload = $writeResult->getPayload();
+                $versionId = $payload['versionId'] ?? Defaults::LIVE_VERSION;
+                if ($versionId !== Defaults::LIVE_VERSION) {
+                    continue;
+                }
+                $liveDeliveryIds[] = $writeResult->getPrimaryKey();
                 if (isset($payload['orderId'])) {
                     $orderIds[$payload['orderId']] = true;
                 }
             }
 
+            if (empty($liveDeliveryIds)) {
+                $this->logger->info('Order delivery sync skipped - no live version writes', [
+                    'component' => 'order.delivery.sync',
+                ]);
+
+                return;
+            }
+
             // When orderId is not in the payload (e.g. ERP PATCH with only trackingCodes),
-            // look up the order IDs from the delivery entities
+            // look up the order IDs from the live delivery entities
             if (empty($orderIds)) {
-                $deliveryIds = $event->getIds();
-                $deliveryCriteria = new Criteria($deliveryIds);
+                $deliveryCriteria = new Criteria($liveDeliveryIds);
                 $deliveries = $this->orderDeliveryRepository->search($deliveryCriteria, $event->getContext());
 
                 /** @var \Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryEntity $delivery */
@@ -289,7 +324,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 if ($this->debugMode) {
                     $this->logger->debug('Resolved order IDs from delivery entities', [
                         'component' => 'order.delivery.sync',
-                        'delivery_ids' => $deliveryIds,
+                        'delivery_ids' => $liveDeliveryIds,
                         'order_ids' => array_keys($orderIds),
                     ]);
                 }
@@ -369,6 +404,18 @@ class OrderSubscriber implements EventSubscriberInterface
             $orders = $this->orderRepository->search($criteria, $context);
             /** @var OrderEntity $order */
             foreach ($orders as $order) {
+                // Defense in depth: skip non-live version entities that may have
+                // slipped through (e.g. resolved via a version-scoped context)
+                if ($order->getVersionId() !== Defaults::LIVE_VERSION) {
+                    $this->logger->info('Order skipped - non-live version', [
+                        'component' => $component,
+                        'order_id' => $order->getId(),
+                        'version_id' => $order->getVersionId(),
+                    ]);
+
+                    continue;
+                }
+
                 $deliveries = $order->getDeliveries();
                 $this->sendKarlaOrder($order, $deliveries, $skipOrderStatusCheck);
             }
@@ -428,6 +475,12 @@ class OrderSubscriber implements EventSubscriberInterface
         $currency = $order->getCurrency();
         $currencyCode = $currency ? $currency->getIsoCode() : null;
 
+        // Prefer the business order date over the row's createdAt, which for a
+        // draft version copy reflects the moment the admin edit was made, not
+        // when the order was actually placed. getOrderDateTime() is non-nullable
+        // on OrderEntity, so no fallback to getCreatedAt() is needed here.
+        $orderPlacedAt = $order->getOrderDateTime();
+
         $lineItemDetails = $this->readLineItems($order->getLineItems());
 
         // Extract tags from the order and format them as segments
@@ -454,7 +507,7 @@ class OrderSubscriber implements EventSubscriberInterface
          'id_type' => 'order_number',
          'order' => [
                 'order_number' => $orderNumber,
-                'order_placed_at' => $order->getCreatedAt()->format(DateTimeInterface::ATOM),
+                'order_placed_at' => $orderPlacedAt->format(DateTimeInterface::ATOM),
                 'products' => $lineItemDetails['products'],
                 'total_order_price' => $order->getPrice()->getTotalPrice(),
                 'shipping_price' => $order->getShippingTotal(),

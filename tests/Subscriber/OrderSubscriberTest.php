@@ -25,6 +25,7 @@ use Shopware\Core\Checkout\Shipping\ShippingMethodEntity;
 use Shopware\Core\Content\Media\MediaEntity;
 use Shopware\Core\Content\Product\Aggregate\ProductMedia\ProductMediaEntity;
 use Shopware\Core\Content\Product\ProductEntity;
+use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Api\Context\AdminApiSource;
 use Shopware\Core\Framework\Api\Context\SalesChannelApiSource;
 use Shopware\Core\Framework\Context;
@@ -188,12 +189,15 @@ class OrderSubscriberTest extends TestCase
     {
         // Mock order repository
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')
+            ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')
             ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
         $productLineItemMock = $this->createMock(OrderLineItemEntity::class);
         $productLineItemMock->method('getId')->willReturn(Uuid::randomHex());
@@ -238,12 +242,15 @@ class OrderSubscriberTest extends TestCase
     private function createOrderEntityMock(): OrderEntity
     {
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')
+            ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')
             ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
         $priceMock = $this->createMock(CartPrice::class);
         $priceMock->method('getTotalPrice')->willReturn(10.00);
@@ -482,12 +489,15 @@ class OrderSubscriberTest extends TestCase
     {
         // Create a fresh mock instead of using createOrderEntityMock to avoid conflicts
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')
+            ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')
             ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
         $priceMock = $this->createMock(CartPrice::class);
         $priceMock->method('getTotalPrice')->willReturn(10.00);
@@ -547,12 +557,15 @@ class OrderSubscriberTest extends TestCase
 
         // Override the getTags method specifically for this test
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')
+            ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')
             ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
         $priceMock = $this->createMock(CartPrice::class);
         $priceMock->method('getTotalPrice')->willReturn(10.00);
@@ -1095,6 +1108,7 @@ class OrderSubscriberTest extends TestCase
     private function createOrderEntityWithDeliveryAndProductsMock(): OrderEntity
     {
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')
             ->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
@@ -1102,6 +1116,8 @@ class OrderSubscriberTest extends TestCase
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')
+            ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')
             ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
 
         $priceMock = $this->createMock(CartPrice::class);
@@ -1161,6 +1177,7 @@ class OrderSubscriberTest extends TestCase
     private function createOrderEntityWithDepositMock(): OrderEntity
     {
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')
             ->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
@@ -1168,6 +1185,8 @@ class OrderSubscriberTest extends TestCase
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')
+            ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')
             ->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
 
         $priceMock = $this->createMock(CartPrice::class);
@@ -1438,12 +1457,14 @@ class OrderSubscriberTest extends TestCase
     {
         // Create order mock with affiliate code (need to create a fresh mock to override)
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
         $priceMock = $this->createMock(CartPrice::class);
         $priceMock->method('getTotalPrice')->willReturn(10.00);
         $orderEntity->method('getPrice')->willReturn($priceMock);
@@ -1504,12 +1525,14 @@ class OrderSubscriberTest extends TestCase
     {
         // Create order mock with both attribution codes (need to create a fresh mock to override)
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
         $priceMock = $this->createMock(CartPrice::class);
         $priceMock->method('getTotalPrice')->willReturn(10.00);
         $orderEntity->method('getPrice')->willReturn($priceMock);
@@ -1584,12 +1607,14 @@ class OrderSubscriberTest extends TestCase
 
         // Create order with tracking number to trigger all debug logs
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
         $priceMock = $this->createMock(CartPrice::class);
         $priceMock->method('getTotalPrice')->willReturn(10.00);
         $orderEntity->method('getPrice')->willReturn($priceMock);
@@ -1697,12 +1722,14 @@ class OrderSubscriberTest extends TestCase
 
         // Create minimal order without sales channel mapping
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('10001');
         $orderEntity->method('getAmountTotal')->willReturn(100.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
         $priceMock = $this->createMock(CartPrice::class);
         $priceMock->method('getTotalPrice')->willReturn(10.00);
         $orderEntity->method('getPrice')->willReturn($priceMock);
@@ -1862,12 +1889,14 @@ class OrderSubscriberTest extends TestCase
 
         // Build order entity from scratch since we can't override mocks
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('ORD-VARIANT-001');
         $orderEntity->method('getAmountTotal')->willReturn(59.98);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
 
         $priceMock = $this->createMock(CartPrice::class);
         $priceMock->method('getTotalPrice')->willReturn(59.98);
@@ -1995,12 +2024,14 @@ class OrderSubscriberTest extends TestCase
 
         // Build order entity with deliveries
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('ORD-DELIVERY-001');
         $orderEntity->method('getAmountTotal')->willReturn(49.99);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
 
         $priceMock = $this->createMock(CartPrice::class);
         $priceMock->method('getTotalPrice')->willReturn(49.99);
@@ -2108,12 +2139,14 @@ class OrderSubscriberTest extends TestCase
         $deliveryCollection = new OrderDeliveryCollection([$deliveryMock]);
 
         $orderEntity = $this->createMock(OrderEntity::class);
+        $orderEntity->method('getVersionId')->willReturn(Defaults::LIVE_VERSION);
         $orderEntity->method('getStateMachineState')->willReturn($this->createMockStateMachineState('in_progress'));
         $orderEntity->method('getId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getOrderNumber')->willReturn('ORD-MULTI-TRACK-001');
         $orderEntity->method('getAmountTotal')->willReturn(50.00);
         $orderEntity->method('getStateId')->willReturn(Uuid::randomHex());
         $orderEntity->method('getCreatedAt')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
+        $orderEntity->method('getOrderDateTime')->willReturn(new \DateTimeImmutable('2020-01-01 10:00:00'));
 
         $priceMock = $this->createMock(CartPrice::class);
         $priceMock->method('getTotalPrice')->willReturn(50.00);
@@ -2322,6 +2355,362 @@ class OrderSubscriberTest extends TestCase
 
         // Act
         $orderSubscriber->onOrderWritten($event);
+    }
+
+    // =========================================================================
+    // Draft Version (Version-Copy) Handling Tests
+    // =========================================================================
+
+    /**
+     * Test that a draft "version copy" write (versionId != Defaults::LIVE_VERSION)
+     * is skipped entirely - no order lookup and no API request
+     */
+    public function testOnOrderWrittenSkipsDraftVersionEvent()
+    {
+        // Arrange: build a write result payload for a Shopware draft version
+        // copy, as created when an order is opened for editing in the admin
+        $context = $this->createAdminApiSourceContextMock();
+        $orderId = Uuid::randomHex();
+        $entityWriteResult = new EntityWriteResult(
+            $orderId,
+            ['id' => $orderId, 'orderNumber' => '10001', 'versionId' => Uuid::randomHex()],
+            OrderDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDefinition::ENTITY_NAME,
+            [$entityWriteResult],
+            $context,
+        );
+
+        // Assert: no order lookup and no API request for draft version writes
+        $this->orderRepositoryMock->expects($this->never())
+            ->method('search');
+        $this->httpClientMock->expects($this->never())
+            ->method('request');
+        $this->loggerMock->expects($this->once())
+            ->method('info')
+            ->with(
+                'Order sync skipped - no live version writes',
+                $this->callback(function ($context) {
+                    return $context['component'] === 'order.sync';
+                })
+            );
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test that a write result with an explicit live versionId still syncs as before
+     */
+    public function testOnOrderWrittenSyncsExplicitLiveVersionEvent()
+    {
+        // Arrange: build a write result payload that explicitly carries the
+        // live versionId (as opposed to omitting the key entirely)
+        $context = $this->createAdminApiSourceContextMock();
+        $orderEntity = $this->createOrderEntityMock();
+        $orderId = $orderEntity->getId();
+        $orderData = [
+            'id' => $orderId,
+            'orderNumber' => '10001',
+            'versionId' => Defaults::LIVE_VERSION,
+        ];
+        $criteria = new Criteria([$orderId]);
+        $entitySearchResult = new EntitySearchResult(
+            OrderDefinition::ENTITY_NAME,
+            1,
+            new OrderCollection([$orderEntity]),
+            null,
+            $criteria,
+            $context,
+        );
+        $entityWriteResult = new EntityWriteResult(
+            $orderId,
+            $orderData,
+            OrderDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDefinition::ENTITY_NAME,
+            [$entityWriteResult],
+            $context,
+        );
+        $this->orderRepositoryMock->expects($this->once())
+            ->method('search')
+            ->willReturn($entitySearchResult);
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: the order is still synced
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->anything()
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test that order_placed_at uses the order's business orderDateTime,
+     * not the row's createdAt (which for a draft version copy reflects the
+     * moment of the admin edit rather than when the order was placed)
+     */
+    public function testOrderPlacedAtUsesOrderDateTimeNotCreatedAt()
+    {
+        // Arrange: orderDateTime is when the order was actually placed;
+        // createdAt simulates a draft row's "now" timestamp from an admin edit
+        $orderDateTime = new \DateTimeImmutable('2024-08-12 09:15:00');
+        $createdAt = new \DateTimeImmutable('2026-07-14 11:45:00');
+
+        $orderEntity = $this->createOrderMock(
+            createdAt: $createdAt,
+            orderDateTime: $orderDateTime,
+        );
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+
+        // Assert: order_placed_at reflects orderDateTime, not createdAt
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                $this->equalTo('PUT'),
+                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
+                $this->callback(function ($options) use ($orderDateTime, $createdAt) {
+                    $body = json_decode($options['body'], true);
+
+                    return $body['order']['order_placed_at'] === $orderDateTime->format(\DateTimeInterface::ATOM)
+                        && $body['order']['order_placed_at'] !== $createdAt->format(\DateTimeInterface::ATOM);
+                })
+            )
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test that processOrders skips a loaded order entity whose versionId is
+     * not the live version - defense in depth against a draft slipping through
+     * event-level filtering (e.g. via a version-scoped context)
+     */
+    public function testProcessOrdersSkipsNonLiveVersionOrderEntity()
+    {
+        // Arrange: the write event itself is a live-version write (default),
+        // but the entity resolved by the repository search is a draft version
+        $orderEntity = $this->createOrderMock(versionId: Uuid::randomHex());
+
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $orderEntity,
+        );
+
+        // Assert: no API request for the non-live order entity
+        $this->httpClientMock->expects($this->never())
+            ->method('request');
+        $this->loggerMock->expects($this->once())
+            ->method('info')
+            ->with(
+                'Order skipped - non-live version',
+                $this->callback(function ($context) {
+                    return $context['component'] === 'order.sync';
+                })
+            );
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderWritten($event);
+    }
+
+    /**
+     * Test that onOrderDeliveryWritten returns early on a draft version
+     * delivery payload, even when it carries an orderId - without querying
+     * the delivery repository fallback at all
+     */
+    public function testOnOrderDeliveryWrittenSkipsDraftVersionPayload()
+    {
+        $context = $this->createAdminApiSourceContextMock();
+        $deliveryId = Uuid::randomHex();
+        // Draft version copy payload - has an orderId, but is not live
+        $entityWriteResult = new EntityWriteResult(
+            $deliveryId,
+            ['id' => $deliveryId, 'orderId' => Uuid::randomHex(), 'versionId' => Uuid::randomHex()],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$entityWriteResult],
+            $context,
+        );
+
+        // Assert: no delivery fallback lookup, no order lookup, no API request
+        $this->orderDeliveryRepositoryMock->expects($this->never())
+            ->method('search');
+        $this->orderRepositoryMock->expects($this->never())
+            ->method('search');
+        $this->httpClientMock->expects($this->never())
+            ->method('request');
+        $this->loggerMock->expects($this->once())
+            ->method('info')
+            ->with(
+                'Order delivery sync skipped - no live version writes',
+                $this->callback(function ($context) {
+                    return $context['component'] === 'order.delivery.sync';
+                })
+            );
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    /**
+     * Test that when an event mixes draft and live delivery payloads without
+     * orderIds, the repository fallback only searches for the live delivery IDs
+     */
+    public function testOnOrderDeliveryWrittenFallbackSearchesOnlyLiveDeliveryIds()
+    {
+        $context = $this->createAdminApiSourceContextMock();
+        $draftDeliveryId = Uuid::randomHex();
+        $liveDeliveryId = Uuid::randomHex();
+        $orderId = Uuid::randomHex();
+
+        // One draft payload and one live payload, both without orderId
+        $draftWriteResult = new EntityWriteResult(
+            $draftDeliveryId,
+            ['id' => $draftDeliveryId, 'versionId' => Uuid::randomHex()],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $liveWriteResult = new EntityWriteResult(
+            $liveDeliveryId,
+            ['id' => $liveDeliveryId, 'versionId' => Defaults::LIVE_VERSION],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$draftWriteResult, $liveWriteResult],
+            $context,
+        );
+
+        // Mock delivery repository to resolve the live delivery to an order
+        $deliveryEntity = $this->createMock(OrderDeliveryEntity::class);
+        $deliveryEntity->method('getOrderId')->willReturn($orderId);
+        $deliverySearchResult = new EntitySearchResult(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            1,
+            new OrderDeliveryCollection([$deliveryEntity]),
+            null,
+            new Criteria([$liveDeliveryId]),
+            $context,
+        );
+
+        // Assert: the fallback search only receives the live delivery ID
+        $this->orderDeliveryRepositoryMock->expects($this->once())
+            ->method('search')
+            ->with(
+                $this->callback(function (Criteria $criteria) use ($liveDeliveryId) {
+                    return $criteria->getIds() === [$liveDeliveryId];
+                }),
+                $this->equalTo($context)
+            )
+            ->willReturn($deliverySearchResult);
+
+        // Mock order repository to return an order for the resolved orderId
+        $orderEntity = $this->createOrderMock(
+            deliveries: $this->createDeliveryCollectionWithTracking(),
+        );
+        $orderSearchResult = new EntitySearchResult(
+            OrderDefinition::ENTITY_NAME,
+            1,
+            new OrderCollection([$orderEntity]),
+            null,
+            new Criteria([$orderId]),
+            $context,
+        );
+        $this->orderRepositoryMock->expects($this->once())
+            ->method('search')
+            ->willReturn($orderSearchResult);
+
+        // Assert: the resolved order is synced
+        $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->willReturn($responseMock);
+
+        $orderSubscriber = new OrderSubscriber(
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
+            $this->httpClientMock
+        );
+
+        // Act
+        $orderSubscriber->onOrderDeliveryWritten($event);
     }
 
     // =========================================================================
