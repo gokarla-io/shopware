@@ -53,6 +53,17 @@
         </input-field>
     </card>
     <card>
+        <title>Delivery Sync Safety</title>
+        <title lang="de-DE">Sicherheit der Liefersynchronisierung</title>
+        <input-field type="datetime">
+            <name>historicalDeliveryCutoff</name>
+            <label>Historical delivery cutoff</label>
+            <label lang="de-DE">Stichtag für historische Lieferungen</label>
+            <helpText>Optional. Deliveries last changed before this date are not sent to Karla. Leave empty to keep the standard behavior.</helpText>
+            <helpText lang="de-DE">Optional. Lieferungen, die vor diesem Datum zuletzt geändert wurden, werden nicht an Karla gesendet. Leer lassen, um das Standardverhalten beizubehalten.</helpText>
+        </input-field>
+    </card>
+    <card>
         <title>Order Statuses</title>
         <title lang="de-DE">Bestellstatus</title>
         <input-field type="bool">
