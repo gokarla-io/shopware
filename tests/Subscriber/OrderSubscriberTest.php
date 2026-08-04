@@ -101,6 +101,7 @@ class OrderSubscriberTest extends TestCase
         $orderData = [
             'id' => $orderId,
             'orderNumber' => '10001',
+            'versionId' => Defaults::LIVE_VERSION,
         ];
         $criteria = new Criteria([$orderId]);
         $entitySearchResult = new EntitySearchResult(
@@ -112,7 +113,7 @@ class OrderSubscriberTest extends TestCase
             $context,
         );
         $entityWriteResult = new EntityWriteResult(
-            $orderId,
+            ['id' => $orderId, 'versionId' => Defaults::LIVE_VERSION],
             $orderData,
             OrderDefinition::ENTITY_NAME,
             $operation,
@@ -2735,6 +2736,7 @@ class OrderSubscriberTest extends TestCase
         $deliveryData = [
             'id' => $deliveryId,
             'orderId' => $orderId,
+            'versionId' => Defaults::LIVE_VERSION,
         ];
 
         $criteria = new Criteria([$orderId]);
@@ -2747,7 +2749,7 @@ class OrderSubscriberTest extends TestCase
             $context,
         );
         $entityWriteResult = new EntityWriteResult(
-            $deliveryId,
+            ['id' => $deliveryId, 'versionId' => Defaults::LIVE_VERSION],
             $deliveryData,
             OrderDeliveryDefinition::ENTITY_NAME,
             EntityWriteResult::OPERATION_UPDATE,
@@ -3127,6 +3129,38 @@ class OrderSubscriberTest extends TestCase
 
         // Act
         $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    public function testOnOrderDeliveryWrittenSkipsMalformedCompositePrimaryKey(): void
+    {
+        $context = $this->createAdminApiSourceContextMock();
+        $writeResult = new EntityWriteResult(
+            ['versionId' => Defaults::LIVE_VERSION],
+            ['versionId' => Defaults::LIVE_VERSION],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$writeResult],
+            $context,
+        );
+
+        $this->orderDeliveryRepositoryMock->expects($this->never())->method('search');
+        $this->orderRepositoryMock->expects($this->never())->method('search');
+        $this->httpClientMock->expects($this->never())->method('request');
+        $this->loggerMock->expects($this->once())
+            ->method('info')
+            ->with(
+                'Order delivery sync skipped - no live version writes',
+                $this->callback(
+                    static fn (array $context): bool => $context['trigger_source'] === 'order_delivery.written'
+                )
+            );
+
+        $this->createSubscriber()->onOrderDeliveryWritten($event);
     }
 
     /**
@@ -3530,11 +3564,20 @@ class OrderSubscriberTest extends TestCase
         $this->loggerMock->method('warning')->willReturnCallback($captureContext);
         $this->loggerMock->method('error')->willReturnCallback($captureContext);
 
-        $order = $this->createOrderMock(isGuestCustomer: false);
-        $event = $this->mockOrderEvent(
+        $deliveryId = Uuid::randomHex();
+        $delivery = $this->createTrackedDelivery(
+            $deliveryId,
+            ['SENSITIVE-TRACKING'],
+            new \DateTimeImmutable('2026-07-30 12:00:00+02:00')
+        );
+        $order = $this->createOrderMock(
+            deliveries: new OrderDeliveryCollection([$delivery]),
+            isGuestCustomer: false
+        );
+        $event = $this->mockOrderDeliveryEvent(
             $this->createAdminApiSourceContextMock(),
             $order,
-            EntityWriteResult::OPERATION_UPDATE
+            $deliveryId
         );
 
         $response = $this->createMock(ResponseInterface::class);
@@ -3542,10 +3585,12 @@ class OrderSubscriberTest extends TestCase
         $response->method('getContent')->willReturn('{"success":true}');
         $this->httpClientMock->method('request')->willReturn($response);
 
-        $this->createSubscriber($systemConfig)->onOrderWritten($event);
+        $this->createSubscriber($systemConfig)->onOrderDeliveryWritten($event);
 
         $serializedContexts = json_encode($loggedContexts, JSON_THROW_ON_ERROR);
-        foreach (['sensitive-user', 'sensitive-api-key', 'test@example.com', 'Example Street', 'John Doe'] as $secret) {
+        foreach (
+            ['sensitive-user', 'sensitive-api-key', 'SENSITIVE-TRACKING', 'test@example.com', 'Example Street', 'John Doe'] as $secret
+        ) {
             $this->assertStringNotContainsString($secret, $serializedContexts);
         }
     }

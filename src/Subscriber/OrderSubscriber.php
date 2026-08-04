@@ -258,12 +258,15 @@ class OrderSubscriber implements EventSubscriberInterface
         foreach ($event->getWriteResults() as $writeResult) {
             $payload = $writeResult->getPayload();
             $versionId = $payload['versionId'] ?? Defaults::LIVE_VERSION;
-            if ($versionId === Defaults::LIVE_VERSION) {
-                if ($writeResult->getOperation() === EntityWriteResult::OPERATION_INSERT) {
-                    $insertedOrderIds[] = $writeResult->getPrimaryKey();
-                } else {
-                    $updatedOrderIds[] = $writeResult->getPrimaryKey();
-                }
+            $orderId = $this->extractEntityId($writeResult->getPrimaryKey());
+            if ($versionId !== Defaults::LIVE_VERSION || $orderId === null) {
+                continue;
+            }
+
+            if ($writeResult->getOperation() === EntityWriteResult::OPERATION_INSERT) {
+                $insertedOrderIds[] = $orderId;
+            } else {
+                $updatedOrderIds[] = $orderId;
             }
         }
 
@@ -324,7 +327,13 @@ class OrderSubscriber implements EventSubscriberInterface
                 if ($versionId !== Defaults::LIVE_VERSION) {
                     continue;
                 }
-                $liveDeliveryIds[] = $writeResult->getPrimaryKey();
+
+                $deliveryId = $this->extractEntityId($writeResult->getPrimaryKey());
+                if ($deliveryId === null) {
+                    continue;
+                }
+
+                $liveDeliveryIds[] = $deliveryId;
                 if (isset($payload['orderId'])) {
                     $orderIds[$payload['orderId']] = true;
                 }
@@ -676,6 +685,16 @@ class OrderSubscriber implements EventSubscriberInterface
         DateTimeInterface $orderPlacedAt
     ): DateTimeInterface {
         return $delivery->getUpdatedAt() ?? $delivery->getCreatedAt() ?? $orderPlacedAt;
+    }
+
+    /**
+     * @param string|array<string, string> $primaryKey
+     */
+    private function extractEntityId(array|string $primaryKey): ?string
+    {
+        $entityId = is_array($primaryKey) ? ($primaryKey['id'] ?? null) : $primaryKey;
+
+        return is_string($entityId) && $entityId !== '' ? $entityId : null;
     }
 
     private function parseHistoricalDeliveryCutoff(mixed $cutoff): ?DateTimeImmutable
