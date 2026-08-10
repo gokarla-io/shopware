@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Karla\Delivery\Subscriber;
 
+use DateTimeImmutable;
 use DateTimeInterface;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryCollection;
+use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDeliveryPosition\OrderDeliveryPositionCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemCollection;
 use Shopware\Core\Checkout\Order\OrderEntity;
@@ -18,6 +20,7 @@ use Shopware\Core\Content\Product\ProductEntity;
 use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\DataAbstractionLayer\EntityWriteResult;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\System\Country\Aggregate\CountryState\CountryStateEntity;
@@ -32,6 +35,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  */
 class OrderSubscriber implements EventSubscriberInterface
 {
+    private const TRIGGER_ORDER_WRITTEN = 'order.written';
+    private const TRIGGER_ORDER_DELIVERY_WRITTEN = 'order_delivery.written';
+
     /**
      * @var LoggerInterface
      */
@@ -102,6 +108,8 @@ class OrderSubscriber implements EventSubscriberInterface
      */
     private bool $debugMode;
 
+    private ?DateTimeImmutable $historicalDeliveryCutoff;
+
     /**
      * OrderSubscriber constructor.
      * @param SystemConfigService $systemConfigService
@@ -124,6 +132,9 @@ class OrderSubscriber implements EventSubscriberInterface
 
         // General Configuration
         $this->debugMode = $systemConfigService->get('KarlaDelivery.config.debugMode') ?? false;
+        $this->historicalDeliveryCutoff = $this->parseHistoricalDeliveryCutoff(
+            $systemConfigService->get('KarlaDelivery.config.historicalDeliveryCutoff')
+        );
 
         // API Configuration
         $this->shopSlug = $systemConfigService->get('KarlaDelivery.config.shopSlug') ?? '';
@@ -242,29 +253,51 @@ class OrderSubscriber implements EventSubscriberInterface
         // edited in the admin. Those writes fire order.written too, but the
         // draft row's metadata (e.g. createdAt) does not reflect the real
         // order, so only live-version writes should be synced to Karla.
-        $liveOrderIds = [];
+        $insertedOrderIds = [];
+        $updatedOrderIds = [];
         foreach ($event->getWriteResults() as $writeResult) {
             $payload = $writeResult->getPayload();
             $versionId = $payload['versionId'] ?? Defaults::LIVE_VERSION;
-            if ($versionId === Defaults::LIVE_VERSION) {
-                $liveOrderIds[] = $writeResult->getPrimaryKey();
+            $orderId = $this->extractEntityId($writeResult->getPrimaryKey());
+            if ($versionId !== Defaults::LIVE_VERSION || $orderId === null) {
+                continue;
+            }
+
+            if ($writeResult->getOperation() === EntityWriteResult::OPERATION_INSERT) {
+                $insertedOrderIds[] = $orderId;
+            } else {
+                $updatedOrderIds[] = $orderId;
             }
         }
 
-        if (empty($liveOrderIds)) {
+        if (empty($insertedOrderIds) && empty($updatedOrderIds)) {
             $this->logger->info('Order sync skipped - no live version writes', [
                 'component' => 'order.sync',
+                'trigger_source' => self::TRIGGER_ORDER_WRITTEN,
             ]);
 
             return;
         }
 
-        $this->processOrders(
-            $liveOrderIds,
-            $event->getContext(),
-            'order.sync',
-            false
-        );
+        if (! empty($insertedOrderIds)) {
+            $this->processOrders(
+                $insertedOrderIds,
+                $event->getContext(),
+                self::TRIGGER_ORDER_WRITTEN,
+                false,
+                null
+            );
+        }
+
+        if (! empty($updatedOrderIds)) {
+            $this->processOrders(
+                $updatedOrderIds,
+                $event->getContext(),
+                self::TRIGGER_ORDER_WRITTEN,
+                false,
+                []
+            );
+        }
     }
 
     /**
@@ -279,7 +312,8 @@ class OrderSubscriber implements EventSubscriberInterface
             if ($this->debugMode) {
                 $this->logger->debug('Received order_delivery.written event', [
                     'component' => 'order.delivery.sync',
-                    'payloads' => $event->getPayloads(),
+                    'trigger_source' => self::TRIGGER_ORDER_DELIVERY_WRITTEN,
+                    'write_count' => count($event->getWriteResults()),
                 ]);
             }
 
@@ -293,7 +327,13 @@ class OrderSubscriber implements EventSubscriberInterface
                 if ($versionId !== Defaults::LIVE_VERSION) {
                     continue;
                 }
-                $liveDeliveryIds[] = $writeResult->getPrimaryKey();
+
+                $deliveryId = $this->extractEntityId($writeResult->getPrimaryKey());
+                if ($deliveryId === null) {
+                    continue;
+                }
+
+                $liveDeliveryIds[] = $deliveryId;
                 if (isset($payload['orderId'])) {
                     $orderIds[$payload['orderId']] = true;
                 }
@@ -302,6 +342,7 @@ class OrderSubscriber implements EventSubscriberInterface
             if (empty($liveDeliveryIds)) {
                 $this->logger->info('Order delivery sync skipped - no live version writes', [
                     'component' => 'order.delivery.sync',
+                    'trigger_source' => self::TRIGGER_ORDER_DELIVERY_WRITTEN,
                 ]);
 
                 return;
@@ -324,6 +365,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 if ($this->debugMode) {
                     $this->logger->debug('Resolved order IDs from delivery entities', [
                         'component' => 'order.delivery.sync',
+                        'trigger_source' => self::TRIGGER_ORDER_DELIVERY_WRITTEN,
                         'delivery_ids' => $liveDeliveryIds,
                         'order_ids' => array_keys($orderIds),
                     ]);
@@ -335,6 +377,7 @@ class OrderSubscriber implements EventSubscriberInterface
             if (empty($orderIds)) {
                 $this->logger->info('Order delivery sync skipped - no order IDs found', [
                     'component' => 'order.delivery.sync',
+                    'trigger_source' => self::TRIGGER_ORDER_DELIVERY_WRITTEN,
                 ]);
 
                 return;
@@ -343,12 +386,14 @@ class OrderSubscriber implements EventSubscriberInterface
             $this->processOrders(
                 $orderIds,
                 $event->getContext(),
-                'order.delivery.sync',
-                true
+                self::TRIGGER_ORDER_DELIVERY_WRITTEN,
+                true,
+                $liveDeliveryIds
             );
         } catch (\Throwable $t) {
             $this->logger->error('Unexpected error during order delivery sync', [
                 'component' => 'order.delivery.sync',
+                'trigger_source' => self::TRIGGER_ORDER_DELIVERY_WRITTEN,
                 'error' => $t->getMessage(),
                 'file' => $t->getFile(),
                 'line' => $t->getLine(),
@@ -361,19 +406,26 @@ class OrderSubscriber implements EventSubscriberInterface
      * Fetch orders by ID and send each to Karla's API
      * @param array $orderIds
      * @param Context $context
-     * @param string $component Log component identifier
+     * @param string $triggerSource Shopware entity event that initiated the sync
      * @param bool $skipOrderStatusCheck Skip order status filtering (used for delivery-triggered syncs)
+     * @param array<string>|null $deliveryIds Delivery IDs to sync; null syncs all deliveries for a new order
      */
     private function processOrders(
         array $orderIds,
         Context $context,
-        string $component,
-        bool $skipOrderStatusCheck
+        string $triggerSource,
+        bool $skipOrderStatusCheck,
+        ?array $deliveryIds
     ): void {
+        $component = $triggerSource === self::TRIGGER_ORDER_DELIVERY_WRITTEN
+            ? 'order.delivery.sync'
+            : 'order.sync';
+
         try {
             if (! $this->isConfigured()) {
                 $this->logger->warning('Order sync skipped - missing configuration', [
                     'component' => $component,
+                    'trigger_source' => $triggerSource,
                 ]);
 
                 return;
@@ -409,6 +461,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 if ($order->getVersionId() !== Defaults::LIVE_VERSION) {
                     $this->logger->info('Order skipped - non-live version', [
                         'component' => $component,
+                        'trigger_source' => $triggerSource,
                         'order_id' => $order->getId(),
                         'version_id' => $order->getVersionId(),
                     ]);
@@ -417,11 +470,18 @@ class OrderSubscriber implements EventSubscriberInterface
                 }
 
                 $deliveries = $order->getDeliveries();
-                $this->sendKarlaOrder($order, $deliveries, $skipOrderStatusCheck);
+                $this->sendKarlaOrder(
+                    $order,
+                    $deliveries,
+                    $triggerSource,
+                    $skipOrderStatusCheck,
+                    $deliveryIds
+                );
             }
         } catch (\Throwable $t) {
             $this->logger->error('Unexpected error during order sync', [
                 'component' => $component,
+                'trigger_source' => $triggerSource,
                 'error' => $t->getMessage(),
                 'file' => $t->getFile(),
                 'line' => $t->getLine(),
@@ -445,12 +505,16 @@ class OrderSubscriber implements EventSubscriberInterface
      * Upsert and optionally fulfill an order through Karla's API
      * @param OrderEntity $order
      * @param OrderDeliveryCollection $deliveries Array of OrderDeliveryEntity objects
+     * @param string $triggerSource Shopware entity event that initiated the sync
      * @param bool $skipOrderStatusCheck Skip order status filtering (used for delivery-triggered syncs)
+     * @param array<string>|null $deliveryIds Delivery IDs to sync; null syncs all deliveries for a new order
      */
     private function sendKarlaOrder(
         OrderEntity $order,
         OrderDeliveryCollection $deliveries,
-        bool $skipOrderStatusCheck = false
+        string $triggerSource,
+        bool $skipOrderStatusCheck,
+        ?array $deliveryIds
     ): void {
         $orderNumber = $order->getOrderNumber();
         $orderStatus = $order->getStateMachineState()->getTechnicalName();
@@ -458,6 +522,7 @@ class OrderSubscriber implements EventSubscriberInterface
         if (! $skipOrderStatusCheck && ! in_array($orderStatus, $this->allowedOrderStatuses, true)) {
             $this->logger->info('Order skipped - status not allowed', [
                 'component' => 'order.sync',
+                'trigger_source' => $triggerSource,
                 'order_number' => $orderNumber,
                 'order_status' => $orderStatus,
                 'allowed_statuses' => $this->allowedOrderStatuses,
@@ -530,11 +595,30 @@ class OrderSubscriber implements EventSubscriberInterface
         }
         $nDeliveries = 0;
         foreach ($deliveries as $delivery) {
+            if ($deliveryIds !== null && ! in_array($delivery->getId(), $deliveryIds, true)) {
+                continue;
+            }
+
+            $deliveryTimestamp = $this->resolveDeliveryTimestamp($delivery, $orderPlacedAt);
+            $deliveryLogContext = [
+                'component' => 'order.delivery.sync',
+                'order_number' => $orderNumber,
+                'delivery_id' => $delivery->getId(),
+                'trigger_source' => $triggerSource,
+                'delivery_timestamp' => $deliveryTimestamp->format(DateTimeInterface::ATOM),
+                'historical_delivery_cutoff' => $this->historicalDeliveryCutoff?->format(DateTimeInterface::ATOM),
+            ];
+
+            if ($this->historicalDeliveryCutoff !== null && $deliveryTimestamp < $this->historicalDeliveryCutoff) {
+                $this->logger->info('Delivery skipped - before historical cutoff', $deliveryLogContext);
+
+                continue;
+            }
+
             $deliveryStatus = $delivery->getStateMachineState()->getTechnicalName();
             if (! in_array($deliveryStatus, $this->allowedDeliveryStatuses, true)) {
                 $this->logger->info('Delivery skipped - status not allowed', [
-                    'component' => 'order.sync',
-                    'order_number' => $orderNumber,
+                    ...$deliveryLogContext,
                     'delivery_status' => $deliveryStatus,
                     'allowed_statuses' => $this->allowedDeliveryStatuses,
                 ]);
@@ -544,42 +628,99 @@ class OrderSubscriber implements EventSubscriberInterface
             $trackingCodes = $delivery->getTrackingCodes();
             if (empty($trackingCodes)) {
                 $this->logger->info('Delivery skipped - no tracking codes', [
-                    'component' => 'order.sync',
-                    'order_number' => $orderNumber,
+                    ...$deliveryLogContext,
                 ]);
 
                 continue;
             }
 
             $deliveryProducts = $this->readDeliveryPositions($delivery->getPositions());
+            if ($this->debugMode) {
+                $this->logger->debug('Delivery included in tracking sync', [
+                    ...$deliveryLogContext,
+                    'tracking_count' => count($trackingCodes),
+                ]);
+            }
             foreach ($trackingCodes as $trackingNumber) {
-                if ($this->debugMode) {
-                    $this->logger->debug('Delivery found with tracking number', [
-                        'component' => 'order.sync',
-                        'order_number' => $orderNumber,
-                        'tracking_number' => $trackingNumber,
-                    ]);
-                }
                 $orderUpsertPayload['trackings'][] = [
                     'tracking_number' => $trackingNumber,
-                    'tracking_placed_at' => (new \DateTime())->format(\DateTime::ATOM),
+                    'tracking_placed_at' => $deliveryTimestamp->format(DateTimeInterface::ATOM),
                     'products' => $deliveryProducts,
                 ];
                 $nDeliveries++;
             }
         }
 
+        if ($triggerSource === self::TRIGGER_ORDER_DELIVERY_WRITTEN && $nDeliveries === 0) {
+            $this->logger->info('Order delivery sync skipped - no eligible tracking data', [
+                'component' => 'order.delivery.sync',
+                'order_number' => $orderNumber,
+                'trigger_source' => $triggerSource,
+                'delivery_ids' => $deliveryIds,
+            ]);
+
+            return;
+        }
+
         $shopSlug = $this->getShopSlugForSalesChannel($order->getSalesChannelId());
         $url = $this->apiUrl . '/v1/shops/' . $shopSlug . '/orders';
-        $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload);
+        $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload, [
+            'component' => 'order.api',
+            'order_number' => $orderNumber,
+            'trigger_source' => $triggerSource,
+            'tracking_count' => count($orderUpsertPayload['trackings']),
+        ]);
 
         $this->logger->info('Order synced to Karla successfully', [
             'component' => 'order.sync',
             'order_number' => $orderNumber,
+            'trigger_source' => $triggerSource,
             'deliveries_count' => $nDeliveries,
             'segments_count' => count($segments),
-            'segments' => ! empty($segments) ? $segments : null,
         ]);
+    }
+
+    private function resolveDeliveryTimestamp(
+        OrderDeliveryEntity $delivery,
+        DateTimeInterface $orderPlacedAt
+    ): DateTimeInterface {
+        return $delivery->getUpdatedAt() ?? $delivery->getCreatedAt() ?? $orderPlacedAt;
+    }
+
+    /**
+     * @param string|array<string, string> $primaryKey
+     */
+    private function extractEntityId(array|string $primaryKey): ?string
+    {
+        $entityId = is_array($primaryKey) ? ($primaryKey['id'] ?? null) : $primaryKey;
+
+        return is_string($entityId) && $entityId !== '' ? $entityId : null;
+    }
+
+    private function parseHistoricalDeliveryCutoff(mixed $cutoff): ?DateTimeImmutable
+    {
+        if ($cutoff === null || $cutoff === '') {
+            return null;
+        }
+
+        try {
+            if ($cutoff instanceof DateTimeInterface) {
+                return DateTimeImmutable::createFromInterface($cutoff);
+            }
+
+            if (! is_string($cutoff)) {
+                throw new \InvalidArgumentException('Cutoff must be a date string');
+            }
+
+            return new DateTimeImmutable($cutoff);
+        } catch (\Throwable) {
+            $this->logger->warning('Historical delivery cutoff ignored - invalid value', [
+                'component' => 'order.config',
+                'value_type' => get_debug_type($cutoff),
+            ]);
+
+            return null;
+        }
     }
 
     /**
@@ -588,10 +729,15 @@ class OrderSubscriber implements EventSubscriberInterface
      * @param string $url
      * @param string $method
      * @param array $orderData
+     * @param array $logContext Privacy-safe request metadata
      */
-    private function sendRequestToKarlaApi(string $url, string $method, array $orderData): void
-    {
-        $jsonPayload = json_encode($orderData);
+    private function sendRequestToKarlaApi(
+        string $url,
+        string $method,
+        array $orderData,
+        array $logContext
+    ): void {
+        $jsonPayload = json_encode($orderData, JSON_THROW_ON_ERROR);
         $auth = base64_encode($this->apiUsername . ':' . $this->apiKey);
         $headers = [
             'Authorization' => 'Basic ' . $auth,
@@ -600,10 +746,10 @@ class OrderSubscriber implements EventSubscriberInterface
 
         if ($this->debugMode) {
             $this->logger->debug('Preparing API request to Karla', [
-                'component' => 'order.api',
+                ...$logContext,
                 'method' => $method,
                 'url' => $url,
-                'payload' => $orderData,
+                'payload_bytes' => strlen($jsonPayload),
             ]);
         }
 
@@ -623,27 +769,26 @@ class OrderSubscriber implements EventSubscriberInterface
             // Log the response
             if ($this->debugMode) {
                 $this->logger->debug('API request to Karla completed', [
-                    'component' => 'order.api',
+                    ...$logContext,
                     'method' => $method,
                     'url' => $url,
                     'status_code' => $statusCode,
-                    'response' => $content,
+                    'response_bytes' => strlen($content),
                 ]);
             }
 
             // If not successful, log error details and throw
             if ($statusCode >= 400) {
                 $this->logger->error('Karla API returned error status', [
-                    'component' => 'order.api',
+                    ...$logContext,
                     'method' => $method,
                     'url' => $url,
                     'status_code' => $statusCode,
-                    'response_body' => $content,
-                    'request_payload' => $orderData,
+                    'response_bytes' => strlen($content),
                 ]);
 
                 throw new \RuntimeException(
-                    sprintf('Karla API returned %d error: %s', $statusCode, $content)
+                    sprintf('Karla API returned %d error', $statusCode)
                 );
             }
         } catch (\RuntimeException $e) {
@@ -652,12 +797,11 @@ class OrderSubscriber implements EventSubscriberInterface
         } catch (\Throwable $e) {
             // Catch any other exception (network errors, timeouts, transport errors)
             $this->logger->error('Failed to send request to Karla API', [
-                'component' => 'order.api',
+                ...$logContext,
                 'method' => $method,
                 'url' => $url,
                 'error' => $e->getMessage(),
                 'error_class' => get_class($e),
-                'request_payload' => $orderData,
             ]);
 
             // Re-throw to be caught by the outer exception handler in onOrderWritten

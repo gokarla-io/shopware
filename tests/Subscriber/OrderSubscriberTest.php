@@ -5,6 +5,7 @@ namespace Karla\Delivery\Tests\Subscriber;
 use Karla\Delivery\Subscriber\OrderSubscriber;
 use Karla\Delivery\Tests\Support\ConfigBuilder;
 use Karla\Delivery\Tests\Support\OrderMockBuilderTrait;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Cart\Price\Struct\CartPrice;
@@ -91,12 +92,16 @@ class OrderSubscriberTest extends TestCase
     /**
      * Create a mock OrderEvent based on an order collection
      */
-    private function mockOrderEvent(Context $context, OrderEntity $orderEntity): EntityWrittenEvent
-    {
+    private function mockOrderEvent(
+        Context $context,
+        OrderEntity $orderEntity,
+        string $operation = EntityWriteResult::OPERATION_INSERT
+    ): EntityWrittenEvent {
         $orderId = Uuid::randomHex();
         $orderData = [
             'id' => $orderId,
             'orderNumber' => '10001',
+            'versionId' => Defaults::LIVE_VERSION,
         ];
         $criteria = new Criteria([$orderId]);
         $entitySearchResult = new EntitySearchResult(
@@ -108,10 +113,10 @@ class OrderSubscriberTest extends TestCase
             $context,
         );
         $entityWriteResult = new EntityWriteResult(
-            $orderId,
+            ['id' => $orderId, 'versionId' => Defaults::LIVE_VERSION],
             $orderData,
             OrderDefinition::ENTITY_NAME,
-            EntityWriteResult::OPERATION_INSERT,
+            $operation,
             null,
             null
         );
@@ -1664,7 +1669,7 @@ class OrderSubscriberTest extends TestCase
 
         // Expect debug logs to be called (6 total):
         // 1. Sales channel mapping parsed (constructor)
-        // 2. Delivery found with tracking number
+        // 2. Delivery included in tracking sync
         // 3. Order segments determined
         // 4. Using mapped shop slug for sales channel
         // 5. Preparing API request to Karla
@@ -1673,7 +1678,7 @@ class OrderSubscriberTest extends TestCase
             ->method('debug')
             ->with(
                 $this->logicalOr(
-                    $this->equalTo('Delivery found with tracking number'),
+                    $this->equalTo('Delivery included in tracking sync'),
                     $this->equalTo('Preparing API request to Karla'),
                     $this->equalTo('API request to Karla completed'),
                     $this->equalTo('Order segments determined'),
@@ -2133,6 +2138,7 @@ class OrderSubscriberTest extends TestCase
         // Create delivery with MULTIPLE tracking codes (the key scenario)
         $deliveryMock = $this->createMock(OrderDeliveryEntity::class);
         $deliveryMock->method('getTrackingCodes')->willReturn(['TRACK-001', 'TRACK-002', 'TRACK-003']);
+        $deliveryMock->method('getUpdatedAt')->willReturn(new \DateTimeImmutable('2026-07-30 12:00:00+00:00'));
         $deliveryMock->method('getPositions')->willReturn($deliveryPositionCollection);
         $deliveryMock->method('getStateMachineState')->willReturn($this->createMockStateMachineState('shipped'));
 
@@ -2192,7 +2198,7 @@ class OrderSubscriberTest extends TestCase
                     // Verify each tracking has products (same products for all)
                     foreach ($trackings as $tracking) {
                         $this->assertArrayHasKey('products', $tracking);
-                        $this->assertArrayHasKey('tracking_placed_at', $tracking);
+                        $this->assertSame('2026-07-30T12:00:00+00:00', $tracking['tracking_placed_at']);
                     }
 
                     return true;
@@ -2680,7 +2686,7 @@ class OrderSubscriberTest extends TestCase
 
         // Mock order repository to return an order for the resolved orderId
         $orderEntity = $this->createOrderMock(
-            deliveries: $this->createDeliveryCollectionWithTracking(),
+            deliveries: $this->createDeliveryCollectionWithTracking($liveDeliveryId),
         );
         $orderSearchResult = new EntitySearchResult(
             OrderDefinition::ENTITY_NAME,
@@ -2720,13 +2726,17 @@ class OrderSubscriberTest extends TestCase
     /**
      * Create a mock OrderDeliveryWritten event based on an order entity
      */
-    private function mockOrderDeliveryEvent(Context $context, OrderEntity $orderEntity): EntityWrittenEvent
-    {
-        $deliveryId = Uuid::randomHex();
+    private function mockOrderDeliveryEvent(
+        Context $context,
+        OrderEntity $orderEntity,
+        ?string $deliveryId = null
+    ): EntityWrittenEvent {
+        $deliveryId ??= $orderEntity->getDeliveries()->first()?->getId() ?: Uuid::randomHex();
         $orderId = $orderEntity->getId();
         $deliveryData = [
             'id' => $deliveryId,
             'orderId' => $orderId,
+            'versionId' => Defaults::LIVE_VERSION,
         ];
 
         $criteria = new Criteria([$orderId]);
@@ -2739,7 +2749,7 @@ class OrderSubscriberTest extends TestCase
             $context,
         );
         $entityWriteResult = new EntityWriteResult(
-            $deliveryId,
+            ['id' => $deliveryId, 'versionId' => Defaults::LIVE_VERSION],
             $deliveryData,
             OrderDeliveryDefinition::ENTITY_NAME,
             EntityWriteResult::OPERATION_UPDATE,
@@ -2870,21 +2880,9 @@ class OrderSubscriberTest extends TestCase
             $orderEntity,
         );
 
-        // Assert: Expect HTTP request but with empty trackings (delivery status filtered out)
-        $responseMock = $this->createMock(ResponseInterface::class);
-        $responseMock->method('getContent')->willReturn('{"success":true}');
-        $this->httpClientMock->expects($this->once())
-            ->method('request')
-            ->with(
-                $this->equalTo('PUT'),
-                $this->equalTo('https://api.example.com/v1/shops/testSlug/orders'),
-                $this->callback(function ($options) {
-                    $body = json_decode($options['body'], true);
-
-                    return empty($body['trackings']);
-                })
-            )
-            ->willReturn($responseMock);
+        // A delivery-only event with no eligible tracking data does not need an order upsert.
+        $this->httpClientMock->expects($this->never())
+            ->method('request');
 
         $orderSubscriber = new OrderSubscriber(
             $this->systemConfigServiceMock,
@@ -3037,7 +3035,7 @@ class OrderSubscriberTest extends TestCase
 
         // Mock order repository to return an order for the resolved orderId
         $orderEntity = $this->createOrderMock(
-            deliveries: $this->createDeliveryCollectionWithTracking(),
+            deliveries: $this->createDeliveryCollectionWithTracking($deliveryId),
         );
         $orderSearchResult = new EntitySearchResult(
             OrderDefinition::ENTITY_NAME,
@@ -3131,6 +3129,38 @@ class OrderSubscriberTest extends TestCase
 
         // Act
         $orderSubscriber->onOrderDeliveryWritten($event);
+    }
+
+    public function testOnOrderDeliveryWrittenSkipsMalformedCompositePrimaryKey(): void
+    {
+        $context = $this->createAdminApiSourceContextMock();
+        $writeResult = new EntityWriteResult(
+            ['versionId' => Defaults::LIVE_VERSION],
+            ['versionId' => Defaults::LIVE_VERSION],
+            OrderDeliveryDefinition::ENTITY_NAME,
+            EntityWriteResult::OPERATION_UPDATE,
+            null,
+            null
+        );
+        $event = new EntityWrittenEvent(
+            OrderDeliveryDefinition::ENTITY_NAME,
+            [$writeResult],
+            $context,
+        );
+
+        $this->orderDeliveryRepositoryMock->expects($this->never())->method('search');
+        $this->orderRepositoryMock->expects($this->never())->method('search');
+        $this->httpClientMock->expects($this->never())->method('request');
+        $this->loggerMock->expects($this->once())
+            ->method('info')
+            ->with(
+                'Order delivery sync skipped - no live version writes',
+                $this->callback(
+                    static fn (array $context): bool => $context['trigger_source'] === 'order_delivery.written'
+                )
+            );
+
+        $this->createSubscriber()->onOrderDeliveryWritten($event);
     }
 
     /**
@@ -3282,7 +3312,7 @@ class OrderSubscriberTest extends TestCase
 
         // Mock order repository
         $orderEntity = $this->createOrderMock(
-            deliveries: $this->createDeliveryCollectionWithTracking(),
+            deliveries: $this->createDeliveryCollectionWithTracking($deliveryId),
         );
         $orderSearchResult = new EntitySearchResult(
             OrderDefinition::ENTITY_NAME,
@@ -3318,14 +3348,291 @@ class OrderSubscriberTest extends TestCase
         $orderSubscriber->onOrderDeliveryWritten($event);
     }
 
+    #[DataProvider('deliveryTimestampProvider')]
+    public function testTrackingPlacedAtUsesShopwareDeliveryTimestamp(
+        ?string $updatedAt,
+        ?string $createdAt,
+        string $orderPlacedAt,
+        string $expectedTimestamp
+    ): void {
+        $deliveryId = Uuid::randomHex();
+        $delivery = $this->createTrackedDelivery(
+            $deliveryId,
+            ['TRACK-TIMESTAMP'],
+            $updatedAt === null ? null : new \DateTimeImmutable($updatedAt),
+            $createdAt === null ? null : new \DateTimeImmutable($createdAt)
+        );
+        $order = $this->createOrderMock(
+            deliveries: new OrderDeliveryCollection([$delivery]),
+            orderDateTime: new \DateTimeImmutable($orderPlacedAt)
+        );
+        $event = $this->mockOrderDeliveryEvent(
+            $this->createAdminApiSourceContextMock(),
+            $order,
+            $deliveryId
+        );
+
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                'PUT',
+                'https://api.example.com/v1/shops/testSlug/orders',
+                $this->callback(static function (array $options) use ($expectedTimestamp): bool {
+                    $payload = json_decode($options['body'], true);
+
+                    return $payload['trackings'][0]['tracking_placed_at'] === $expectedTimestamp;
+                })
+            )
+            ->willReturn($response);
+
+        $this->createSubscriber()->onOrderDeliveryWritten($event);
+    }
+
+    public static function deliveryTimestampProvider(): iterable
+    {
+        yield 'updatedAt preferred' => [
+            '2026-07-21 23:42:00+02:00',
+            '2026-01-09 14:03:00+01:00',
+            '2026-01-08 17:05:00+01:00',
+            '2026-07-21T23:42:00+02:00',
+        ];
+        yield 'createdAt fallback' => [
+            null,
+            '2026-01-09 14:03:00+01:00',
+            '2026-01-08 17:05:00+01:00',
+            '2026-01-09T14:03:00+01:00',
+        ];
+        yield 'order date fallback' => [
+            null,
+            null,
+            '2026-01-08 17:05:00+01:00',
+            '2026-01-08T17:05:00+01:00',
+        ];
+    }
+
+    public function testOrderUpdateDoesNotReplayExistingTracking(): void
+    {
+        $delivery = $this->createTrackedDelivery(
+            Uuid::randomHex(),
+            ['HISTORICAL-TRACKING'],
+            new \DateTimeImmutable('2026-01-09 14:03:00+01:00')
+        );
+        $order = $this->createOrderMock(
+            deliveries: new OrderDeliveryCollection([$delivery])
+        );
+        $event = $this->mockOrderEvent(
+            $this->createAdminApiSourceContextMock(),
+            $order,
+            EntityWriteResult::OPERATION_UPDATE
+        );
+
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                'PUT',
+                'https://api.example.com/v1/shops/testSlug/orders',
+                $this->callback(static function (array $options): bool {
+                    $payload = json_decode($options['body'], true);
+
+                    return $payload['trackings'] === [];
+                })
+            )
+            ->willReturn($response);
+
+        $this->createSubscriber()->onOrderWritten($event);
+    }
+
+    public function testDeliveryEventSynchronizesOnlyChangedDelivery(): void
+    {
+        $unchangedDelivery = $this->createTrackedDelivery(
+            Uuid::randomHex(),
+            ['UNCHANGED-TRACKING'],
+            new \DateTimeImmutable('2026-01-09 14:03:00+01:00')
+        );
+        $changedDeliveryId = Uuid::randomHex();
+        $changedDelivery = $this->createTrackedDelivery(
+            $changedDeliveryId,
+            ['CHANGED-TRACKING'],
+            new \DateTimeImmutable('2026-07-30 12:00:00+02:00')
+        );
+        $order = $this->createOrderMock(
+            deliveries: new OrderDeliveryCollection([$unchangedDelivery, $changedDelivery])
+        );
+        $event = $this->mockOrderDeliveryEvent(
+            $this->createAdminApiSourceContextMock(),
+            $order,
+            $changedDeliveryId
+        );
+
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->expects($this->once())
+            ->method('request')
+            ->with(
+                'PUT',
+                'https://api.example.com/v1/shops/testSlug/orders',
+                $this->callback(static function (array $options): bool {
+                    $payload = json_decode($options['body'], true);
+
+                    return count($payload['trackings']) === 1
+                        && $payload['trackings'][0]['tracking_number'] === 'CHANGED-TRACKING';
+                })
+            )
+            ->willReturn($response);
+
+        $this->createSubscriber()->onOrderDeliveryWritten($event);
+    }
+
+    public function testHistoricalDeliveryCutoffSkipsOldChangedDelivery(): void
+    {
+        $systemConfig = $this->createMock(SystemConfigService::class);
+        $systemConfig->method('get')->willReturnMap(
+            ConfigBuilder::create()
+                ->withHistoricalDeliveryCutoff('2026-07-01T00:00:00+02:00')
+                ->buildMap()
+        );
+
+        $deliveryId = Uuid::randomHex();
+        $delivery = $this->createTrackedDelivery(
+            $deliveryId,
+            ['HISTORICAL-TRACKING'],
+            new \DateTimeImmutable('2026-01-09 14:03:00+01:00')
+        );
+        $order = $this->createOrderMock(deliveries: new OrderDeliveryCollection([$delivery]));
+        $event = $this->mockOrderDeliveryEvent(
+            $this->createAdminApiSourceContextMock(),
+            $order,
+            $deliveryId
+        );
+
+        $this->httpClientMock->expects($this->never())->method('request');
+
+        $this->createSubscriber($systemConfig)->onOrderDeliveryWritten($event);
+    }
+
+    public function testHistoricalDeliveryCutoffAcceptsDateTimeValue(): void
+    {
+        $systemConfig = $this->createMock(SystemConfigService::class);
+        $systemConfig->method('get')->willReturnMap(
+            ConfigBuilder::create()
+                ->withHistoricalDeliveryCutoff(new \DateTimeImmutable('2026-07-01T00:00:00+02:00'))
+                ->buildMap()
+        );
+        $this->loggerMock->expects($this->never())->method('warning');
+
+        $this->assertInstanceOf(OrderSubscriber::class, $this->createSubscriber($systemConfig));
+    }
+
+    public function testHistoricalDeliveryCutoffIgnoresInvalidValue(): void
+    {
+        $systemConfig = $this->createMock(SystemConfigService::class);
+        $systemConfig->method('get')->willReturnMap(
+            ConfigBuilder::create()
+                ->withHistoricalDeliveryCutoff(123)
+                ->buildMap()
+        );
+        $this->loggerMock->expects($this->once())
+            ->method('warning')
+            ->with(
+                'Historical delivery cutoff ignored - invalid value',
+                $this->callback(static fn (array $context): bool => $context['value_type'] === 'int')
+            );
+
+        $this->assertInstanceOf(OrderSubscriber::class, $this->createSubscriber($systemConfig));
+    }
+
+    public function testDebugLogsDoNotContainCredentialsOrCustomerPii(): void
+    {
+        $systemConfig = $this->createMock(SystemConfigService::class);
+        $systemConfig->method('get')->willReturnMap(
+            ConfigBuilder::create()
+                ->withApiConfig('testSlug', 'sensitive-user', 'sensitive-api-key', self::TEST_API_URL)
+                ->withDebugMode(true)
+                ->buildMap()
+        );
+
+        $loggedContexts = [];
+        $captureContext = static function (string $message, array $context) use (&$loggedContexts): void {
+            $loggedContexts[] = [$message, $context];
+        };
+        $this->loggerMock->method('debug')->willReturnCallback($captureContext);
+        $this->loggerMock->method('info')->willReturnCallback($captureContext);
+        $this->loggerMock->method('warning')->willReturnCallback($captureContext);
+        $this->loggerMock->method('error')->willReturnCallback($captureContext);
+
+        $deliveryId = Uuid::randomHex();
+        $delivery = $this->createTrackedDelivery(
+            $deliveryId,
+            ['SENSITIVE-TRACKING'],
+            new \DateTimeImmutable('2026-07-30 12:00:00+02:00')
+        );
+        $order = $this->createOrderMock(
+            deliveries: new OrderDeliveryCollection([$delivery]),
+            isGuestCustomer: false
+        );
+        $event = $this->mockOrderDeliveryEvent(
+            $this->createAdminApiSourceContextMock(),
+            $order,
+            $deliveryId
+        );
+
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn(200);
+        $response->method('getContent')->willReturn('{"success":true}');
+        $this->httpClientMock->method('request')->willReturn($response);
+
+        $this->createSubscriber($systemConfig)->onOrderDeliveryWritten($event);
+
+        $serializedContexts = json_encode($loggedContexts, JSON_THROW_ON_ERROR);
+        foreach (
+            ['sensitive-user', 'sensitive-api-key', 'SENSITIVE-TRACKING', 'test@example.com', 'Example Street', 'John Doe'] as $secret
+        ) {
+            $this->assertStringNotContainsString($secret, $serializedContexts);
+        }
+    }
+
+    private function createSubscriber(?SystemConfigService $systemConfig = null): OrderSubscriber
+    {
+        return new OrderSubscriber(
+            $systemConfig ?? $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->orderRepositoryMock,
+            $this->orderDeliveryRepositoryMock,
+            $this->httpClientMock
+        );
+    }
+
+    private function createTrackedDelivery(
+        string $deliveryId,
+        array $trackingCodes,
+        ?\DateTimeInterface $updatedAt = null,
+        ?\DateTimeInterface $createdAt = null
+    ): OrderDeliveryEntity {
+        $delivery = $this->createMock(OrderDeliveryEntity::class);
+        $delivery->method('getId')->willReturn($deliveryId);
+        $delivery->method('getUpdatedAt')->willReturn($updatedAt);
+        $delivery->method('getCreatedAt')->willReturn($createdAt);
+        $delivery->method('getStateMachineState')->willReturn($this->createMockStateMachineState('shipped'));
+        $delivery->method('getTrackingCodes')->willReturn($trackingCodes);
+        $delivery->method('getPositions')->willReturn(new OrderDeliveryPositionCollection([]));
+
+        return $delivery;
+    }
+
     /**
      * Helper: create a delivery collection with a shipped delivery and tracking code
      */
-    private function createDeliveryCollectionWithTracking(): OrderDeliveryCollection
+    private function createDeliveryCollectionWithTracking(?string $deliveryId = null): OrderDeliveryCollection
     {
-        $delivery = $this->createMock(OrderDeliveryEntity::class);
-        $delivery->method('getStateMachineState')->willReturn($this->createMockStateMachineState('shipped'));
-        $delivery->method('getTrackingCodes')->willReturn(['123456']);
+        /** @var OrderDeliveryEntity&\PHPUnit\Framework\MockObject\MockObject $delivery */
+        $delivery = $this->createTrackedDelivery(
+            $deliveryId ?? Uuid::randomHex(),
+            ['123456']
+        );
 
         $productLineItem = $this->createMock(OrderLineItemEntity::class);
         $productLineItem->method('getId')->willReturn(Uuid::randomHex());

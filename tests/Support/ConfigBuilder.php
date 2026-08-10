@@ -104,6 +104,7 @@ class ConfigBuilder
         $this->config['KarlaDelivery.config.depositLineItemType'] = '';
         $this->config['KarlaDelivery.config.salesChannelMapping'] = '';
         $this->config['KarlaDelivery.config.debugMode'] = false;
+        $this->config['KarlaDelivery.config.historicalDeliveryCutoff'] = null;
 
         return $this;
     }
@@ -125,6 +126,13 @@ class ConfigBuilder
     public function withDebugMode(bool $enabled): self
     {
         $this->config['KarlaDelivery.config.debugMode'] = $enabled;
+
+        return $this;
+    }
+
+    public function withHistoricalDeliveryCutoff(mixed $cutoff): self
+    {
+        $this->config['KarlaDelivery.config.historicalDeliveryCutoff'] = $cutoff;
 
         return $this;
     }
