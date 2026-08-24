@@ -66,6 +66,7 @@
             <argument type="service" id="Doctrine\DBAL\Connection"/>
             <argument type="service" id="seo_url.repository"/>
             <argument type="service" id="sales_channel.repository"/>
+            <tag name="kernel.reset" method="reset"/>
         </service>
 
         <service id="Karla\Delivery\Subscriber\ProductSubscriber">

@@ -83,7 +83,7 @@ class ProductSyncServiceTest extends TestCase
      *
      * @param array<int, array{id: string, languageId: string, domains: ?array<int, array{languageId: string, url: string}>}> $specs
      */
-    private function stubChannels(array $specs, bool $expectSingleSearch = false): void
+    private function stubChannels(array $specs, ?int $expectedSearches = null): void
     {
         $channels = [];
         foreach ($specs as $spec) {
@@ -114,8 +114,9 @@ class ProductSyncServiceTest extends TestCase
         $collection->method('getElements')->willReturn($channels);
         $result = $this->createMock(EntitySearchResult::class);
         $result->method('getEntities')->willReturn($collection);
-        if ($expectSingleSearch) {
-            $this->salesChannelRepositoryMock->expects($this->once())->method('search')->willReturn($result);
+        if ($expectedSearches !== null) {
+            $this->salesChannelRepositoryMock->expects($this->exactly($expectedSearches))
+                ->method('search')->willReturn($result);
         } else {
             $this->salesChannelRepositoryMock->method('search')->willReturn($result);
         }
@@ -123,17 +124,18 @@ class ProductSyncServiceTest extends TestCase
 
     /**
      * Stub a single storefront sales channel resolving to $baseUrl for $languageId.
+     * When $expectedSearches is given, assert exactly that many channel queries.
      */
     private function stubStorefront(
         string $baseUrl,
         string $languageId = 'lang-1',
-        bool $expectSingleSearch = false
+        ?int $expectedSearches = null
     ): void {
         $this->stubChannels([
             ['id' => 'sc-1', 'languageId' => $languageId, 'domains' => [
                 ['languageId' => $languageId, 'url' => $baseUrl],
             ]],
-        ], $expectSingleSearch);
+        ], $expectedSearches);
     }
 
     /**
@@ -218,6 +220,38 @@ class ProductSyncServiceTest extends TestCase
         $this->service->upsertProduct($product);
 
         return $captured;
+    }
+
+    /**
+     * Stub config + HTTP so upserts succeed, collecting every JSON body sent
+     * to Karla (for tests that drive several upserts).
+     *
+     * @return \ArrayObject<int, array<string, mixed>>
+     */
+    private function captureUpsertBodies(): \ArrayObject
+    {
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.shopSlug', null, 'test-shop'],
+            ['KarlaDelivery.config.apiUrl', null, 'https://api.test.com'],
+            ['KarlaDelivery.config.debugMode', null, false],
+            ['KarlaDelivery.config.apiUsername', null, 'user'],
+            ['KarlaDelivery.config.apiKey', null, 'key'],
+            ['KarlaDelivery.config.requestTimeout', null, 10.0],
+        ]);
+
+        $bodies = new \ArrayObject();
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn(200);
+        $response->method('getContent')->willReturn('{}');
+        $this->httpClientMock->method('request')->willReturnCallback(
+            function (string $method, string $url, array $options) use ($bodies, $response): ResponseInterface {
+                $bodies[] = json_decode((string) $options['body'], true);
+
+                return $response;
+            }
+        );
+
+        return $bodies;
     }
 
     private function makeStandaloneProduct(string $id, string $number, string $name): ProductEntity
@@ -334,8 +368,8 @@ class ProductSyncServiceTest extends TestCase
 
     public function testStorefrontResolutionIsCachedAcrossUpserts(): void
     {
-        // expectSingleSearch: the second upsert must hit the cache, not the repo
-        $this->stubStorefront('https://shop.example.com', 'lang-1', true);
+        // Exactly one channel query: the second upsert must hit the cache, not the repo
+        $this->stubStorefront('https://shop.example.com', 'lang-1', 1);
         $this->stubSeoUrls(['product-id-123' => '/p']);
         $this->systemConfigServiceMock->method('get')->willReturnMap([
             ['KarlaDelivery.config.shopSlug', null, 'test-shop'],
@@ -363,6 +397,46 @@ class ProductSyncServiceTest extends TestCase
 
         $this->assertSame('https://shop.example.com/p', $bodies[0]['product_url']);
         $this->assertSame('https://shop.example.com/p', $bodies[1]['product_url']);
+    }
+
+    public function testResetClearsCachedStorefrontResolution(): void
+    {
+        // kernel.reset must drop the cached storefront: the channel query runs
+        // once before reset() and once again after it
+        $this->stubStorefront('https://shop.example.com', 'lang-1', 2);
+        $this->stubSeoUrls(['product-id-123' => '/p']);
+        $bodies = $this->captureUpsertBodies();
+
+        $this->service->upsertProduct($this->makeStandaloneProduct('product-id-123', 'P-1', 'N1'));
+        $this->service->reset();
+        $this->service->upsertProduct($this->makeStandaloneProduct('product-id-123', 'P-2', 'N2'));
+
+        $this->assertSame('https://shop.example.com/p', $bodies[0]['product_url']);
+        $this->assertSame('https://shop.example.com/p', $bodies[1]['product_url']);
+    }
+
+    public function testResetClearsParentMap(): void
+    {
+        $this->stubNoStorefront();
+        $parent = $this->makeStandaloneProduct('parent-id-123', 'PARENT-001', 'Parent Product');
+        $variant = $this->createMock(ProductEntity::class);
+        $variant->method('getProductNumber')->willReturn('SW200-1');
+        $variant->method('getName')->willReturn('Red Variant');
+        $variant->method('getId')->willReturn('variant-id-456');
+        $variant->method('getParentId')->willReturn('parent-id-123');
+        $variant->method('getPrice')->willReturn(null);
+        $variant->method('getCover')->willReturn(null);
+        $variant->method('getTranslations')->willReturn(null);
+        $bodies = $this->captureUpsertBodies();
+
+        $this->service->upsertProduct($variant, $parent);
+        $this->service->reset();
+        $this->service->upsertProduct($variant);
+
+        // Before reset() the parent is remembered (title = parent name); after
+        // it the parent map is empty, so the variant carries no parent title
+        $this->assertSame('Parent Product', $bodies[0]['title']);
+        $this->assertNull($bodies[1]['title']);
     }
 
     public function testUpsertProductUrlOmittedWhenNoProductIds(): void

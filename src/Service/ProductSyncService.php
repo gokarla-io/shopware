@@ -18,8 +18,9 @@ use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\OrFilter;
 use Shopware\Core\System\SalesChannel\SalesChannelEntity;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\Service\ResetInterface;
 
-class ProductSyncService
+class ProductSyncService implements ResetInterface
 {
     /**
      * Map of parent product IDs to parent ProductEntity objects
@@ -51,6 +52,19 @@ class ProductSyncService
         private EntityRepository $seoUrlRepository,
         private EntityRepository $salesChannelRepository
     ) {
+    }
+
+    /**
+     * Clear per-instance state. Wired to `kernel.reset`, so the cached
+     * storefront base and the parent map never outlive a request or a single
+     * Messenger message in a long-lived worker: a storefront domain change is
+     * picked up on the next message instead of the next worker restart.
+     */
+    public function reset(): void
+    {
+        $this->parentMap = [];
+        $this->storefrontUrlBase = null;
+        $this->storefrontResolved = false;
     }
 
     /**
