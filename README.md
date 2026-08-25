@@ -28,6 +28,18 @@ The Karla Delivery extension automatically synchronizes your Shopware orders and
 - **Custom API Endpoint** - Use production or custom GoKarla API endpoints
 - **Detailed Logging** - Built-in logging for troubleshooting and monitoring
 
+### Signed Tracking Links in Shopware Emails
+
+After a successful order sync, the extension stores an authenticated Karla tracking link in the order custom field `karla_trackpage_url`. A native Shopware mail template can use it without letting Karla send the email:
+
+```twig
+{% if order.customFields.karla_trackpage_url %}
+    <a href="{{ order.customFields.karla_trackpage_url }}">Sendung verfolgen</a>
+{% endif %}
+```
+
+Keep the existing postcode-authenticated tracking link as a fallback for historical orders that do not yet have the custom field. Treat the signed URL as a customer credential: do not expose it in logs or admin exports.
+
 ## Requirements
 
 - **Shopware 6** - Compatible with Shopware 6.x

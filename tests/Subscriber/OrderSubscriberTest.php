@@ -2,6 +2,7 @@
 
 namespace Karla\Delivery\Tests\Subscriber;
 
+use Karla\Delivery\Service\TrackpageUrlService;
 use Karla\Delivery\Subscriber\OrderSubscriber;
 use Karla\Delivery\Tests\Support\ConfigBuilder;
 use Karla\Delivery\Tests\Support\OrderMockBuilderTrait;
@@ -70,6 +71,9 @@ class OrderSubscriberTest extends TestCase
     /** @var SystemConfigService&\PHPUnit\Framework\MockObject\MockObject */
     private SystemConfigService $systemConfigServiceMock;
 
+    /** @var TrackpageUrlService&\PHPUnit\Framework\MockObject\MockObject */
+    private TrackpageUrlService $trackpageUrlServiceMock;
+
     protected function setUp(): void
     {
         $this->loggerMock = $this->createMock(LoggerInterface::class);
@@ -77,6 +81,7 @@ class OrderSubscriberTest extends TestCase
         $this->orderDeliveryRepositoryMock = $this->createMock(EntityRepository::class);
         $this->httpClientMock = $this->createMock(HttpClientInterface::class);
         $this->systemConfigServiceMock = $this->createMock(SystemConfigService::class);
+        $this->trackpageUrlServiceMock = $this->createMock(TrackpageUrlService::class);
 
         // Configure systemConfigServiceMock using ConfigBuilder
         $configMap = ConfigBuilder::create()
@@ -344,10 +349,15 @@ class OrderSubscriberTest extends TestCase
      */
     public function testOnOrderWrittenFull()
     {
+        $context = $this->createSalesChannelApiSourceContextMock();
+        $order = $this->createOrderEntityMock();
         $event = $this->mockOrderEvent(
-            $this->createSalesChannelApiSourceContextMock(),
-            $this->createOrderEntityMock(),
+            $context,
+            $order,
         );
+        $this->trackpageUrlServiceMock->expects($this->once())
+            ->method('ensureForOrder')
+            ->with($order, self::TEST_SHOP_SLUG, $context);
         // Mock HTTP response and its expectation
         $responseMock = $this->createMock(ResponseInterface::class);
         $responseMock->method('getContent')->willReturn('{"success":true}');
@@ -387,11 +397,25 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
         $orderSubscriber->onOrderWritten($event);
+    }
+
+    public function testOnOrderWrittenSkipsTrackpageUrlPersistenceEvent(): void
+    {
+        $context = Context::createDefaultContext();
+        $context->addState(TrackpageUrlService::CONTEXT_STATE);
+        $event = new EntityWrittenEvent(OrderDefinition::ENTITY_NAME, [], $context);
+
+        $this->orderRepositoryMock->expects($this->never())->method('search');
+        $this->httpClientMock->expects($this->never())->method('request');
+        $this->trackpageUrlServiceMock->expects($this->never())->method('ensureForOrder');
+
+        $this->createSubscriber()->onOrderWritten($event);
     }
 
     /**
@@ -421,7 +445,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -480,7 +505,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -674,7 +700,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -720,7 +747,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -788,7 +816,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -836,7 +865,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
     }
 
@@ -876,7 +906,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -907,7 +938,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Should not throw exception
@@ -945,7 +977,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -989,7 +1022,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1039,7 +1073,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1101,7 +1136,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1250,7 +1286,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Assert
@@ -1292,7 +1329,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -1334,7 +1372,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -1380,7 +1419,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -1423,7 +1463,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Use reflection to set shopSlug to empty to trigger the early return
@@ -1517,7 +1558,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1586,7 +1628,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1702,7 +1745,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1778,7 +1822,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1843,7 +1888,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -1962,7 +2008,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2103,7 +2150,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2216,7 +2264,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2264,7 +2313,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2311,7 +2361,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2356,7 +2407,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2410,7 +2462,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2476,7 +2529,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2528,7 +2582,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2568,7 +2623,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2620,7 +2676,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2712,7 +2769,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2805,7 +2863,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2852,7 +2911,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2889,7 +2949,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -2921,7 +2982,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Create a minimal delivery event
@@ -2986,7 +3048,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act - should not throw
@@ -3061,7 +3124,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -3124,7 +3188,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -3205,7 +3270,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act - should not throw
@@ -3257,7 +3323,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -3341,7 +3408,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
 
         // Act
@@ -3602,7 +3670,8 @@ class OrderSubscriberTest extends TestCase
             $this->loggerMock,
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
-            $this->httpClientMock
+            $this->httpClientMock,
+            $this->trackpageUrlServiceMock
         );
     }
 

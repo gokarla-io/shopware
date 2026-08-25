@@ -16,7 +16,15 @@
             <argument type="service" id="order.repository"/>
             <argument type="service" id="order_delivery.repository"/>
             <argument type="service" id="Symfony\Contracts\HttpClient\HttpClientInterface"/>
+            <argument type="service" id="Karla\Delivery\Service\TrackpageUrlService"/>
             <tag name="kernel.event_subscriber"/>
+        </service>
+
+        <service id="Karla\Delivery\Service\TrackpageUrlService">
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="Symfony\Contracts\HttpClient\HttpClientInterface"/>
+            <argument type="service" id="order.repository"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
         </service>
 
         <!-- Webhook Services -->

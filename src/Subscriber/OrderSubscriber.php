@@ -6,6 +6,7 @@ namespace Karla\Delivery\Subscriber;
 
 use DateTimeImmutable;
 use DateTimeInterface;
+use Karla\Delivery\Service\TrackpageUrlService;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryCollection;
@@ -57,6 +58,8 @@ class OrderSubscriber implements EventSubscriberInterface
      * @var HttpClientInterface
      */
     private HttpClientInterface $httpClient;
+
+    private TrackpageUrlService $trackpageUrlService;
 
     /**
      * @var string
@@ -117,6 +120,7 @@ class OrderSubscriber implements EventSubscriberInterface
      * @param EntityRepository $orderRepository
      * @param EntityRepository $orderDeliveryRepository
      * @param HttpClientInterface $httpClient
+     * @param TrackpageUrlService $trackpageUrlService
      */
     public function __construct(
         SystemConfigService $systemConfigService,
@@ -124,11 +128,13 @@ class OrderSubscriber implements EventSubscriberInterface
         EntityRepository $orderRepository,
         EntityRepository $orderDeliveryRepository,
         HttpClientInterface $httpClient,
+        TrackpageUrlService $trackpageUrlService,
     ) {
         $this->logger = $logger;
         $this->orderRepository = $orderRepository;
         $this->orderDeliveryRepository = $orderDeliveryRepository;
         $this->httpClient = $httpClient;
+        $this->trackpageUrlService = $trackpageUrlService;
 
         // General Configuration
         $this->debugMode = $systemConfigService->get('KarlaDelivery.config.debugMode') ?? false;
@@ -249,6 +255,10 @@ class OrderSubscriber implements EventSubscriberInterface
      */
     public function onOrderWritten(EntityWrittenEvent $event): void
     {
+        if ($event->getContext()->hasState(TrackpageUrlService::CONTEXT_STATE)) {
+            return;
+        }
+
         // Shopware creates a draft "version copy" of an order while it is being
         // edited in the admin. Those writes fire order.written too, but the
         // draft row's metadata (e.g. createdAt) does not reflect the real
@@ -473,6 +483,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 $this->sendKarlaOrder(
                     $order,
                     $deliveries,
+                    $context,
                     $triggerSource,
                     $skipOrderStatusCheck,
                     $deliveryIds
@@ -505,6 +516,7 @@ class OrderSubscriber implements EventSubscriberInterface
      * Upsert and optionally fulfill an order through Karla's API
      * @param OrderEntity $order
      * @param OrderDeliveryCollection $deliveries Array of OrderDeliveryEntity objects
+     * @param Context $context
      * @param string $triggerSource Shopware entity event that initiated the sync
      * @param bool $skipOrderStatusCheck Skip order status filtering (used for delivery-triggered syncs)
      * @param array<string>|null $deliveryIds Delivery IDs to sync; null syncs all deliveries for a new order
@@ -512,6 +524,7 @@ class OrderSubscriber implements EventSubscriberInterface
     private function sendKarlaOrder(
         OrderEntity $order,
         OrderDeliveryCollection $deliveries,
+        Context $context,
         string $triggerSource,
         bool $skipOrderStatusCheck,
         ?array $deliveryIds
@@ -678,6 +691,8 @@ class OrderSubscriber implements EventSubscriberInterface
             'deliveries_count' => $nDeliveries,
             'segments_count' => count($segments),
         ]);
+
+        $this->trackpageUrlService->ensureForOrder($order, $shopSlug, $context);
     }
 
     private function resolveDeliveryTimestamp(
