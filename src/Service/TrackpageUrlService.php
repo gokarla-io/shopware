@@ -99,7 +99,6 @@ class TrackpageUrlService
                         'id' => $order->getId(),
                         'versionId' => Defaults::LIVE_VERSION,
                         'customFields' => [
-                            ...$customFields,
                             self::CUSTOM_FIELD_NAME => $trackpageUrl,
                         ],
                     ],

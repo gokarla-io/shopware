@@ -51,7 +51,7 @@ class TrackpageUrlServiceTest extends TestCase
         );
     }
 
-    public function testStoresSignedUrlAndPreservesExistingCustomFields(): void
+    public function testStoresOnlySignedUrlWithoutOverwritingOtherCustomFields(): void
     {
         $order = $this->createOrder(['existing_field' => 'existing-value']);
         $context = Context::createDefaultContext();
@@ -83,7 +83,6 @@ class TrackpageUrlServiceTest extends TestCase
                         'id' => $order->getId(),
                         'versionId' => Defaults::LIVE_VERSION,
                         'customFields' => [
-                            'existing_field' => 'existing-value',
                             TrackpageUrlService::CUSTOM_FIELD_NAME => self::SIGNED_URL,
                         ],
                     ]];
