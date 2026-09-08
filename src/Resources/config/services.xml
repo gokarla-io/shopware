@@ -34,10 +34,15 @@
             <argument type="service" id="monolog.logger.karla_delivery"/>
         </service>
 
+        <service id="Karla\Delivery\Service\WebhookEventFactory">
+            <argument type="service" id="order.repository"/>
+        </service>
+
         <service id="Karla\Delivery\Controller\Api\WebhookController" public="true">
             <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
             <argument type="service" id="event_dispatcher"/>
             <argument type="service" id="monolog.logger.karla_delivery"/>
+            <argument type="service" id="Karla\Delivery\Service\WebhookEventFactory"/>
             <call method="setContainer">
                 <argument type="service" id="service_container"/>
             </call>

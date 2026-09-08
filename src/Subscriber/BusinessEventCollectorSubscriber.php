@@ -68,6 +68,8 @@ class BusinessEventCollectorSubscriber implements EventSubscriberInterface
                     'Shopware\Core\Framework\Event\MailAware',
                     'orderAware',
                     'Shopware\Core\Framework\Event\OrderAware',
+                    'languageAware',
+                    'Shopware\Core\Framework\Event\LanguageAware',
                     'customerAware',
                     'Shopware\Core\Framework\Event\CustomerAware',
                 ];

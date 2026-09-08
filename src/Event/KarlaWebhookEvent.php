@@ -14,6 +14,7 @@ use Shopware\Core\Framework\Event\EventData\EventDataCollection;
 use Shopware\Core\Framework\Event\EventData\MailRecipientStruct;
 use Shopware\Core\Framework\Event\EventData\ScalarValueType;
 use Shopware\Core\Framework\Event\FlowEventAware;
+use Shopware\Core\Framework\Event\LanguageAware;
 use Shopware\Core\Framework\Event\MailAware;
 use Shopware\Core\Framework\Event\OrderAware;
 use Symfony\Contracts\EventDispatcher\Event;
@@ -30,7 +31,7 @@ use Symfony\Contracts\EventDispatcher\Event;
  * - Set order state, add order tags, generate documents
  * - Add customer tags, change customer group, set custom fields
  */
-class KarlaWebhookEvent extends Event implements FlowEventAware, MailAware, OrderAware, CustomerAware
+class KarlaWebhookEvent extends Event implements FlowEventAware, MailAware, OrderAware, CustomerAware, LanguageAware
 {
     /**
      * All possible event groups that Karla backend can send.
@@ -101,6 +102,7 @@ class KarlaWebhookEvent extends Event implements FlowEventAware, MailAware, Orde
     public function __construct(
         private readonly array $webhookData,
         private readonly Context $context,
+        private readonly ?string $salesChannelId = null,
     ) {
     }
 
@@ -254,10 +256,14 @@ class KarlaWebhookEvent extends Event implements FlowEventAware, MailAware, Orde
         ]);
     }
 
+    public function getLanguageId(): ?string
+    {
+        return $this->context->getLanguageId();
+    }
+
     public function getSalesChannelId(): ?string
     {
-        // No specific sales channel for webhook events
-        return null;
+        return $this->salesChannelId;
     }
 
     /**

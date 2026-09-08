@@ -6,10 +6,17 @@ namespace Karla\Delivery\Tests\Controller\Api;
 
 use Karla\Delivery\Controller\Api\WebhookController;
 use Karla\Delivery\Event\KarlaWebhookEvent;
+use Karla\Delivery\Service\WebhookEventFactory;
 use Karla\Delivery\Tests\Fixtures\KarlaWebhookPayloads;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Shopware\Core\Checkout\Order\OrderCollection;
+use Shopware\Core\Checkout\Order\OrderEntity;
 use Shopware\Core\Framework\Context;
+use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
+use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Component\EventDispatcher\EventDispatcherInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -41,11 +48,50 @@ final class WebhookControllerTest extends TestCase
         $this->eventDispatcherMock = $this->createMock(EventDispatcherInterface::class);
         $this->loggerMock = $this->createMock(LoggerInterface::class);
 
+        $eventFactory = $this->createMock(WebhookEventFactory::class);
+        $eventFactory->method('create')->willReturnCallback(
+            static fn (array $data, Context $context): KarlaWebhookEvent => new KarlaWebhookEvent($data, $context),
+        );
+
         $this->webhookController = new WebhookController(
             $this->systemConfigServiceMock,
             $this->eventDispatcherMock,
             $this->loggerMock,
+            $eventFactory,
         );
+    }
+
+    public function testSignedClaimDispatchesWithOrderLanguageAndSalesChannel(): void
+    {
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.webhookEnabled', null, true],
+            ['KarlaDelivery.config.webhookSecret', null, self::TEST_SECRET],
+        ]);
+        $context = Context::createDefaultContext();
+        $order = new OrderEntity();
+        $order->setId(Uuid::randomHex());
+        $order->setLanguageId(Uuid::randomHex());
+        $order->setSalesChannelId(Uuid::randomHex());
+        $repository = $this->createMock(EntityRepository::class);
+        $repository->method('search')->willReturn(new EntitySearchResult('order', 1, new OrderCollection([$order]), null, new Criteria(), $context));
+        $controller = new WebhookController(
+            $this->systemConfigServiceMock,
+            $this->eventDispatcherMock,
+            $this->loggerMock,
+            new WebhookEventFactory($repository),
+        );
+        $data = KarlaWebhookPayloads::claim();
+        $data['context']['order']['external_id'] = $order->getId();
+        $payload = json_encode($data, JSON_THROW_ON_ERROR);
+        $request = new Request(content: $payload);
+        $request->headers->set('Karla-Signature', $this->generateValidSignature($payload, self::TEST_SECRET, time()));
+        $this->eventDispatcherMock->expects(self::once())->method('dispatch')->with(
+            self::callback(static fn (KarlaWebhookEvent $event): bool => $event->getContext()->getLanguageId() === $order->getLanguageId()
+                && $event->getSalesChannelId() === $order->getSalesChannelId()),
+            'karla.claim.created',
+        );
+
+        self::assertSame(Response::HTTP_OK, $controller->handleWebhook($request, 'test-webhook-id', $context)->getStatusCode());
     }
 
     /**
