@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Karla\Delivery\Controller\Api;
 
-use Karla\Delivery\Event\KarlaWebhookEvent;
+use Karla\Delivery\Service\WebhookEventFactory;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
@@ -30,6 +30,7 @@ class WebhookController extends AbstractController
         private readonly SystemConfigService $systemConfigService,
         private readonly EventDispatcherInterface $eventDispatcher,
         private readonly LoggerInterface $logger,
+        private readonly WebhookEventFactory $eventFactory,
     ) {
     }
 
@@ -160,7 +161,7 @@ class WebhookController extends AbstractController
             }
 
             // Create and dispatch event (validation happens in getName())
-            $event = new KarlaWebhookEvent($data, $context);
+            $event = $this->eventFactory->create($data, $context);
             $eventName = $event->getName(); // Technical name: karla.shipment.in_transit
 
             if ($debugMode) {

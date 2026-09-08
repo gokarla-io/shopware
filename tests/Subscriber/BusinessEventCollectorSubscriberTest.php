@@ -84,6 +84,8 @@ final class BusinessEventCollectorSubscriberTest extends TestCase
         $definition = $collection->get('karla.shipment.delivered');
         $this->assertEquals('karla.shipment.delivered', $definition->getName());
         $this->assertEquals(KarlaWebhookEvent::class, $definition->getClass());
+        $this->assertTrue($definition->getAware('languageAware'));
+        $this->assertTrue($definition->getAware('Shopware\Core\Framework\Event\LanguageAware'));
     }
 
     /**
