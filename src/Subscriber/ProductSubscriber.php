@@ -82,6 +82,9 @@ class ProductSubscriber implements EventSubscriberInterface
 
             $products = $this->productRepository->search($criteria, $context);
 
+            /** @var array<ProductEntity> $standaloneProducts */
+            $standaloneProducts = [];
+
             /** @var ProductEntity $product */
             foreach ($products as $product) {
                 // Only sync active products
@@ -121,11 +124,13 @@ class ProductSubscriber implements EventSubscriberInterface
                         'variants_found' => $variants->count(),
                     ]);
 
-                    // Sync each variant with the parent entity
-                    /** @var ProductEntity $variant */
-                    foreach ($variants as $variant) {
-                        $this->productSyncService->upsertProduct($variant, $product);
+                    // Sync all variants in one call so product URLs are resolved
+                    // with a single batched SEO query instead of one per variant
+                    /** @var array<ProductEntity> $variantList */
+                    $variantList = iterator_to_array($variants, false);
+                    $this->productSyncService->upsertProducts($variantList, $product);
 
+                    foreach ($variantList as $variant) {
                         $this->logger->info('Variant synced to Karla', [
                             'component' => 'product.sync',
                             'variant_number' => $variant->getProductNumber(),
@@ -133,9 +138,17 @@ class ProductSubscriber implements EventSubscriberInterface
                         ]);
                     }
                 } else {
-                    // Regular product or variant - sync it
-                    $this->productSyncService->upsertProduct($product);
+                    // Regular product or variant - collect for one batched sync
+                    $standaloneProducts[] = $product;
+                }
+            }
 
+            if (count($standaloneProducts) > 0) {
+                // One call for the whole event: product URLs resolve with a
+                // single batched SEO query instead of one per product
+                $this->productSyncService->upsertProducts($standaloneProducts);
+
+                foreach ($standaloneProducts as $product) {
                     $this->logger->info('Product synced to Karla', [
                         'component' => 'product.sync',
                         'product_number' => $product->getProductNumber(),
