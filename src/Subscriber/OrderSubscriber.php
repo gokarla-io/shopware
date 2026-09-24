@@ -6,6 +6,7 @@ namespace Karla\Delivery\Subscriber;
 
 use DateTimeImmutable;
 use DateTimeInterface;
+use Karla\Delivery\Service\MigrationProtectionService;
 use Karla\Delivery\Service\TrackpageUrlService;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressEntity;
@@ -129,6 +130,7 @@ class OrderSubscriber implements EventSubscriberInterface
         EntityRepository $orderDeliveryRepository,
         HttpClientInterface $httpClient,
         TrackpageUrlService $trackpageUrlService,
+        private readonly MigrationProtectionService $migrationProtection,
     ) {
         $this->logger = $logger;
         $this->orderRepository = $orderRepository;
@@ -529,6 +531,10 @@ class OrderSubscriber implements EventSubscriberInterface
         bool $skipOrderStatusCheck,
         ?array $deliveryIds
     ): void {
+        if ($this->migrationProtection->shouldSuppress($order)) {
+            return;
+        }
+
         $orderNumber = $order->getOrderNumber();
         $orderStatus = $order->getStateMachineState()->getTechnicalName();
 

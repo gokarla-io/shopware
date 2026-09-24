@@ -16,12 +16,14 @@ use Shopware\Core\Framework\Uuid\Uuid;
 class WebhookEventFactory
 {
     /** @param EntityRepository<OrderCollection> $orderRepository */
-    public function __construct(private readonly EntityRepository $orderRepository)
-    {
+    public function __construct(
+        private readonly EntityRepository $orderRepository,
+        private readonly MigrationProtectionService $migrationProtection,
+    ) {
     }
 
     /** @param array<string, mixed> $data */
-    public function create(array $data, Context $context): KarlaWebhookEvent
+    public function create(array $data, Context $context): ?KarlaWebhookEvent
     {
         $orderId = (new KarlaWebhookEvent($data, $context))->getOrderId();
         if (! Uuid::isValid($orderId)) {
@@ -32,6 +34,11 @@ class WebhookEventFactory
         $order = $this->orderRepository->search($criteria, $context)->first();
         if (! $order instanceof OrderEntity) {
             throw new \RuntimeException('Shopware order not found for webhook.');
+        }
+
+        if (str_starts_with((string) ($data['event_group'] ?? ''), 'shipment_')
+            && $this->migrationProtection->shouldSuppress($order)) {
+            return null;
         }
 
         // SendMailAction loads translated templates using the flow context, before

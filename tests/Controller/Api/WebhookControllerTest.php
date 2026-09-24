@@ -6,8 +6,10 @@ namespace Karla\Delivery\Tests\Controller\Api;
 
 use Karla\Delivery\Controller\Api\WebhookController;
 use Karla\Delivery\Event\KarlaWebhookEvent;
+use Karla\Delivery\Service\MigrationProtectionService;
 use Karla\Delivery\Service\WebhookEventFactory;
 use Karla\Delivery\Tests\Fixtures\KarlaWebhookPayloads;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Order\OrderCollection;
@@ -61,6 +63,57 @@ final class WebhookControllerTest extends TestCase
         );
     }
 
+    #[DataProvider('migrationWebhooks')]
+    public function testMigrationWebhookGuard(string $group, bool $old, bool $validSignature, bool $dispatch): void
+    {
+        $context = Context::createDefaultContext();
+        $order = new OrderEntity();
+        $order->setId(Uuid::randomHex());
+        $order->setSalesChannelId(Uuid::randomHex());
+        $order->setLanguageId(Uuid::randomHex());
+        $order->setOrderDateTime(new \DateTimeImmutable($old ? '2024-01-01' : '2026-03-11T00:00:00Z'));
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.webhookEnabled', null, true],
+            ['KarlaDelivery.config.webhookSecret', null, self::TEST_SECRET],
+            ['KarlaDelivery.config.migrationProtectionEnabled', $order->getSalesChannelId(), true],
+            ['KarlaDelivery.config.migrationOrderCutoff', $order->getSalesChannelId(), '2026-03-11T00:00:00Z'],
+        ]);
+        $repository = $this->createMock(EntityRepository::class);
+        $repository->expects($validSignature ? self::exactly(2) : self::never())->method('search')
+            ->willReturn(new EntitySearchResult('order', 1, new OrderCollection([$order]), null, new Criteria(), $context));
+        $controller = new WebhookController(
+            $this->systemConfigServiceMock,
+            $this->eventDispatcherMock,
+            $this->loggerMock,
+            new WebhookEventFactory($repository, new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock))
+        );
+        $data = KarlaWebhookPayloads::shipment();
+        $data['event_group'] = $group;
+        $data['context']['order']['external_id'] = $order->getId();
+        // Eligibility must use the stored order, never dates or channel supplied by a webhook.
+        $data['context']['order']['placed_at'] = '2030-01-01T00:00:00Z';
+        $data['context']['order']['sales_channel_id'] = Uuid::randomHex();
+        $payload = json_encode($data, JSON_THROW_ON_ERROR);
+        $request = new Request(content: $payload);
+        $request->headers->set('Karla-Signature', $this->generateValidSignature($payload, $validSignature ? self::TEST_SECRET : 'wrong', time()));
+        $this->eventDispatcherMock->expects($dispatch ? self::exactly(2) : self::never())->method('dispatch');
+        for ($attempt = 0; $attempt < 2; ++$attempt) {
+            $response = $controller->handleWebhook($request, 'test-webhook-id', $context);
+            self::assertSame($validSignature ? 200 : 401, $response->getStatusCode());
+            if ($validSignature && ! $dispatch) {
+                self::assertStringContainsString('migration_protection', (string) $response->getContent());
+            }
+        }
+    }
+
+    public static function migrationWebhooks(): iterable
+    {
+        yield 'historical shipment' => ['shipment_delivered', true, true, false];
+        yield 'current shipment' => ['shipment_delivered', false, true, true];
+        yield 'historical claim unaffected' => ['claim_created', true, true, true];
+        yield 'signature still required' => ['shipment_delivered', true, false, false];
+    }
+
     public function testSignedClaimDispatchesWithOrderLanguageAndSalesChannel(): void
     {
         $this->systemConfigServiceMock->method('get')->willReturnMap([
@@ -78,7 +131,7 @@ final class WebhookControllerTest extends TestCase
             $this->systemConfigServiceMock,
             $this->eventDispatcherMock,
             $this->loggerMock,
-            new WebhookEventFactory($repository),
+            new WebhookEventFactory($repository, $this->createMock(MigrationProtectionService::class)),
         );
         $data = KarlaWebhookPayloads::claim();
         $data['context']['order']['external_id'] = $order->getId();

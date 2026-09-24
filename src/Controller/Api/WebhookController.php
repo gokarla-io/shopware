@@ -162,6 +162,9 @@ class WebhookController extends AbstractController
 
             // Create and dispatch event (validation happens in getName())
             $event = $this->eventFactory->create($data, $context);
+            if ($event === null) {
+                return new JsonResponse(['status' => 'suppressed', 'reason' => 'migration_protection'], Response::HTTP_OK);
+            }
             $eventName = $event->getName(); // Technical name: karla.shipment.in_transit
 
             if ($debugMode) {
