@@ -44,13 +44,13 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
 
         // Handle product sync toggle
         if ($key === 'KarlaDelivery.config.productSyncEnabled') {
-            $this->handleProductSyncToggle($event->getValue());
+            $this->handleProductSyncToggle($event->getValue(), $salesChannelId);
 
             return;
         }
 
         // Only handle Karla Delivery webhook configuration changes
-        if (! str_starts_with($key, 'KarlaDelivery.config.webhook')) {
+        if ($key !== 'KarlaDelivery.config.webhookEnabled') {
             return;
         }
 
@@ -85,7 +85,9 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
 
         if ($enabled) {
             // Check if webhook already exists
-            $webhookId = $this->systemConfigService->get('KarlaDelivery.config.webhookId', $salesChannelId);
+            $webhookId = ($salesChannelId === null
+                ? $this->systemConfigService->get('KarlaDelivery.config.webhookId')
+                : ($this->systemConfigService->getDomain('KarlaDelivery.config', $salesChannelId)['KarlaDelivery.config.webhookId'] ?? null));
 
             if ($debugMode) {
                 $this->logger->debug('Handling webhook enabled change', [
@@ -108,7 +110,7 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
 
             // Create new webhook
             try {
-                $webhookUrl = $this->webhookService->generateWebhookUrl($this->baseUrl);
+                $webhookUrl = $this->webhookService->generateWebhookUrl($this->baseUrl, $salesChannelId);
                 $enabledEvents = $this->getEnabledEventsArray($salesChannelId);
 
                 if ($debugMode) {
@@ -121,7 +123,7 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
                 }
 
                 // Karla will generate both UUID and secret
-                $webhookData = $this->webhookService->createWebhook($webhookUrl, $enabledEvents);
+                $webhookData = $this->webhookService->createWebhook($webhookUrl, $enabledEvents, $salesChannelId);
                 $webhookId = $webhookData['uuid'];
                 $webhookSecret = $webhookData['secret'];
 
@@ -148,7 +150,9 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
                     // Verify the saved values
                     $savedUrl = $this->systemConfigService->get('KarlaDelivery.config.webhookUrl', $salesChannelId);
                     $savedSecret = $this->systemConfigService->get('KarlaDelivery.config.webhookSecret', $salesChannelId);
-                    $savedId = $this->systemConfigService->get('KarlaDelivery.config.webhookId', $salesChannelId);
+                    $savedId = ($salesChannelId === null
+                ? $this->systemConfigService->get('KarlaDelivery.config.webhookId')
+                : ($this->systemConfigService->getDomain('KarlaDelivery.config', $salesChannelId)['KarlaDelivery.config.webhookId'] ?? null));
 
                     $this->logger->debug('Webhook config verification', [
                         'saved_url' => $savedUrl,
@@ -179,7 +183,9 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
             }
         } else {
             // Delete existing webhook
-            $webhookId = $this->systemConfigService->get('KarlaDelivery.config.webhookId', $salesChannelId);
+            $webhookId = ($salesChannelId === null
+                ? $this->systemConfigService->get('KarlaDelivery.config.webhookId')
+                : ($this->systemConfigService->getDomain('KarlaDelivery.config', $salesChannelId)['KarlaDelivery.config.webhookId'] ?? null));
 
             if ($debugMode) {
                 $this->logger->debug('Handling webhook disabled change', [
@@ -207,7 +213,7 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
                     ]);
                 }
 
-                $this->webhookService->deleteWebhook($webhookId);
+                $this->webhookService->deleteWebhook($webhookId, $salesChannelId);
 
                 if ($debugMode) {
                     $this->logger->debug('Webhook deleted, clearing config', [
@@ -235,17 +241,8 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
                     'sales_channel_id' => $salesChannelId,
                 ]);
 
-                // Even if deletion fails, clear the config to allow retry
-                // This prevents the webhook from being stuck in "enabled" state
-                $this->systemConfigService->set('KarlaDelivery.config.webhookUrl', null, $salesChannelId);
-                $this->systemConfigService->set('KarlaDelivery.config.webhookSecret', null, $salesChannelId);
-                $this->systemConfigService->set('KarlaDelivery.config.webhookId', null, $salesChannelId);
+                // Retain identity and credentials so a failed deletion can be retried.
 
-                if ($debugMode) {
-                    $this->logger->debug('Webhook config cleared despite error', [
-                        'sales_channel_id' => $salesChannelId,
-                    ]);
-                }
             }
         }
     }
@@ -281,7 +278,7 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
      * @codeCoverageIgnore
      * This private method is implicitly tested through onSystemConfigChanged.
      */
-    private function handleProductSyncToggle(mixed $enabled): void
+    private function handleProductSyncToggle(mixed $enabled, ?string $salesChannelId): void
     {
         if (! $enabled) {
             $this->logger->info('Product sync disabled', [
@@ -292,7 +289,9 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
         }
 
         // Check last time product sync was enabled
-        $lastEnabled = $this->systemConfigService->get('KarlaDelivery.config.productSyncLastEnabled');
+        $lastEnabled = $salesChannelId === null
+            ? $this->systemConfigService->get('KarlaDelivery.config.productSyncLastEnabled')
+            : ($this->systemConfigService->getDomain('KarlaDelivery.config', $salesChannelId)['KarlaDelivery.config.productSyncLastEnabled'] ?? null);
         $now = time();
         $cooldownSeconds = 300; // 5 minutes cooldown
 
@@ -304,11 +303,11 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
             ]);
 
             // Update timestamp
-            $this->systemConfigService->set('KarlaDelivery.config.productSyncLastEnabled', $now);
-            $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'running');
+            $this->systemConfigService->set('KarlaDelivery.config.productSyncLastEnabled', $now, $salesChannelId);
+            $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'running', $salesChannelId);
 
             // Dispatch message to queue
-            $this->messageBus->dispatch(new SyncAllProductsMessage());
+            $this->messageBus->dispatch(new SyncAllProductsMessage(salesChannelId: $salesChannelId));
         } else {
             $secondsSinceLastSync = $now - $lastEnabled;
             $this->logger->info('Product sync enabled - skipping full sync (recently synced)', [

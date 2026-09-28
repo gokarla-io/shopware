@@ -2,6 +2,7 @@
 
 namespace Karla\Delivery\Tests\Subscriber;
 
+use Karla\Delivery\Service\MigrationProtectionService;
 use Karla\Delivery\Service\TrackpageUrlService;
 use Karla\Delivery\Subscriber\OrderSubscriber;
 use Karla\Delivery\Tests\Support\ConfigBuilder;
@@ -398,7 +399,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -446,7 +448,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -506,7 +509,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -701,7 +705,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -748,7 +753,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -817,7 +823,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfigMock, $this->loggerMock),
         );
 
         // Triggered when `ORDER_WRITTEN_EVENT` is dispatched
@@ -841,7 +848,7 @@ class OrderSubscriberTest extends TestCase
     /**
      * Test order skipped when configuration is missing
      */
-    public function testOrderSkippedWhenConfigurationMissing()
+    public function testConstructorDoesNotWarnBeforeChannelConfigurationIsResolved()
     {
         // Arrange: Setup config with missing API credentials
         $systemConfigMock = $this->createMock(SystemConfigService::class);
@@ -854,10 +861,7 @@ class OrderSubscriberTest extends TestCase
 
         $systemConfigMock->method('get')->willReturnMap($configMap);
 
-        // Assert: Expect warning log
-        $this->loggerMock->expects($this->once())
-            ->method('warning')
-            ->with($this->stringContains('Missing critical configuration'));
+        $this->loggerMock->expects($this->never())->method('warning');
 
         // Act
         new OrderSubscriber(
@@ -866,7 +870,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfigMock, $this->loggerMock),
         );
     }
 
@@ -907,7 +912,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -939,7 +945,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Should not throw exception
@@ -978,7 +985,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1023,7 +1031,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1074,7 +1083,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1137,7 +1147,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfigMock, $this->loggerMock),
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1287,7 +1298,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfigMock, $this->loggerMock),
         );
 
         // Assert
@@ -1330,7 +1342,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -1373,7 +1386,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -1420,7 +1434,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -1438,7 +1453,7 @@ class OrderSubscriberTest extends TestCase
         $systemConfigMock->method('get')->willReturnMap([
             // API config - initially set for constructor, but simulates being cleared
             ['KarlaDelivery.config.shopSlug', null, 'testSlug'], // Set for constructor
-            ['KarlaDelivery.config.apiUsername', null, 'testUser'],
+            ['KarlaDelivery.config.apiUsername', null, ''],
             ['KarlaDelivery.config.apiKey', null, 'testKey'],
             ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
             ['KarlaDelivery.config.requestTimeout', null, 10.5],
@@ -1464,14 +1479,9 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfigMock, $this->loggerMock),
         );
-
-        // Use reflection to set shopSlug to empty to trigger the early return
-        $reflection = new \ReflectionClass($orderSubscriber);
-        $shopSlugProperty = $reflection->getProperty('shopSlug');
-        $shopSlugProperty->setAccessible(true);
-        $shopSlugProperty->setValue($orderSubscriber, '');
 
         $orderEntity = $this->createOrderEntityMock();
         $event = $this->mockOrderEvent(
@@ -1559,7 +1569,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1629,7 +1640,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1746,7 +1758,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfigMock, $this->loggerMock),
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1823,7 +1836,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfigMock, $this->loggerMock),
         );
 
         $orderSubscriber->onOrderWritten($event);
@@ -1889,7 +1903,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2009,7 +2024,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2151,7 +2167,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2265,7 +2282,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2314,7 +2332,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2362,7 +2381,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2408,7 +2428,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2463,7 +2484,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2530,7 +2552,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2583,7 +2606,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2624,7 +2648,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2677,7 +2702,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2770,7 +2796,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2864,7 +2891,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2912,7 +2940,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2950,7 +2979,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -2983,7 +3013,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfigMock, $this->loggerMock),
         );
 
         // Create a minimal delivery event
@@ -3049,7 +3080,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act - should not throw
@@ -3125,7 +3157,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -3189,7 +3222,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act
@@ -3271,7 +3305,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($this->systemConfigServiceMock, $this->loggerMock),
         );
 
         // Act - should not throw
@@ -3324,7 +3359,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfigMock, $this->loggerMock),
         );
 
         // Act
@@ -3409,7 +3445,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfigMock, $this->loggerMock),
         );
 
         // Act
@@ -3663,6 +3700,49 @@ class OrderSubscriberTest extends TestCase
         }
     }
 
+    #[DataProvider('migrationTriggers')]
+    public function testMigrationProtectionGuardsBothWriteTriggers(string $trigger, string $operation, bool $historical = true): void
+    {
+        $deliveryId = Uuid::randomHex();
+        $order = $this->createOrderMock(
+            deliveries: new OrderDeliveryCollection([$this->createTrackedDelivery($deliveryId, ['OLD-TRACKING'], new \DateTimeImmutable('2030-01-01'))]),
+            orderDateTime: new \DateTimeImmutable($historical ? '2024-01-01' : '2026-03-11T00:00:00Z')
+        );
+        $values = array_column(ConfigBuilder::create()->buildMap(), 2, 0);
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturnCallback(static function (string $key, ?string $channel = null) use ($order, $values): mixed {
+            if ($channel === $order->getSalesChannelId()) {
+                return str_ends_with($key, 'Enabled') ? true : '2026-03-11T00:00:00Z';
+            }
+
+            return $values[$key] ?? null;
+        });
+        $context = $this->createAdminApiSourceContextMock();
+        $event = $trigger === 'order' ? $this->mockOrderEvent($context, $order, $operation)
+            : $this->mockOrderDeliveryEvent($context, $order, $deliveryId);
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getContent')->willReturn('{}');
+        $this->httpClientMock->expects($historical ? self::never() : self::exactly(2))->method('request')->willReturn($response);
+        $this->trackpageUrlServiceMock->expects($historical ? self::never() : self::exactly(2))->method('ensureForOrder');
+        $subscriber = $this->createSubscriber($config);
+        for ($attempt = 0; $attempt < 2; ++$attempt) {
+            if ($trigger === 'order') {
+                $subscriber->onOrderWritten($event);
+            } else {
+                $subscriber->onOrderDeliveryWritten($event);
+            }
+        }
+    }
+
+    public static function migrationTriggers(): iterable
+    {
+        yield 'existing order' => ['order', EntityWriteResult::OPERATION_UPDATE];
+        yield 'new historical order' => ['order', EntityWriteResult::OPERATION_INSERT];
+        yield 'delivery updated by ERP' => ['delivery', EntityWriteResult::OPERATION_UPDATE];
+        yield 'current order' => ['order', EntityWriteResult::OPERATION_UPDATE, false];
+        yield 'current delivery' => ['delivery', EntityWriteResult::OPERATION_UPDATE, false];
+    }
+
     private function createSubscriber(?SystemConfigService $systemConfig = null): OrderSubscriber
     {
         return new OrderSubscriber(
@@ -3671,7 +3751,8 @@ class OrderSubscriberTest extends TestCase
             $this->orderRepositoryMock,
             $this->orderDeliveryRepositoryMock,
             $this->httpClientMock,
-            $this->trackpageUrlServiceMock
+            $this->trackpageUrlServiceMock,
+            new MigrationProtectionService($systemConfig ?? $this->systemConfigServiceMock, $this->loggerMock),
         );
     }
 
@@ -3719,4 +3800,61 @@ class OrderSubscriberTest extends TestCase
 
         return new OrderDeliveryCollection([$delivery]);
     }
+    public function testTwoBrandOrdersUseChannelCredentialsWithoutGlobalShopConfiguration(): void
+    {
+        $first = $this->createOrderMock(orderNumber: 'brand-a');
+        $second = $this->createOrderMock(orderNumber: 'brand-b');
+        $first->method('getUniqueIdentifier')->willReturn($first->getId());
+        $second->method('getUniqueIdentifier')->willReturn($second->getId());
+        $channels = [$first->getSalesChannelId() => 'first', $second->getSalesChannelId() => 'second'];
+        $defaults = [];
+        foreach (ConfigBuilder::create()->buildMap() as [$key, $scope, $value]) {
+            $defaults[$key] = $value;
+        }
+        $defaults['KarlaDelivery.config.shopSlug'] = '';
+        $defaults['KarlaDelivery.config.salesChannelMapping'] = $second->getSalesChannelId() . ':mapped-second';
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturnCallback(static function (string $key, ?string $channel = null) use ($channels, $defaults) {
+            if (! isset($channels[$channel])) {
+                return $defaults[$key] ?? null;
+            }
+            $brand = $channels[$channel];
+
+            return match ($key) {
+                'KarlaDelivery.config.shopSlug' => $brand,
+                'KarlaDelivery.config.apiUsername' => $brand . '-user',
+                'KarlaDelivery.config.apiKey' => $brand . '-key',
+                'KarlaDelivery.config.apiUrl' => 'https://' . $brand . '.example',
+                default => $defaults[$key] ?? null,
+            };
+        });
+        $context = Context::createDefaultContext();
+        $this->orderRepositoryMock->method('search')->willReturn(new EntitySearchResult(
+            'order',
+            2,
+            new OrderCollection([$first, $second]),
+            null,
+            new Criteria(),
+            $context,
+        ));
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn(200);
+        $seen = [];
+        $this->httpClientMock->expects(self::exactly(2))->method('request')->willReturnCallback(
+            static function (string $method, string $url, array $options) use (&$seen, $response) {
+                $brand = count($seen) === 0 ? 'first' : 'second';
+                $slug = $brand === 'first' ? 'first' : 'mapped-second';
+                self::assertSame('https://' . $brand . '.example/v1/shops/' . $slug . '/orders', $url);
+                self::assertSame('Basic ' . base64_encode($brand . '-user:' . $brand . '-key'), $options['headers']['Authorization']);
+                $seen[] = $brand;
+
+                return $response;
+            },
+        );
+        $this->trackpageUrlServiceMock->expects(self::exactly(2))->method('ensureForOrder');
+        $subscriber = new OrderSubscriber($config, $this->loggerMock, $this->orderRepositoryMock, $this->orderDeliveryRepositoryMock, $this->httpClientMock, $this->trackpageUrlServiceMock, $this->createMock(\Karla\Delivery\Service\MigrationProtectionService::class));
+        $write = new EntityWriteResult($first->getId(), ['id' => $first->getId()], OrderDefinition::ENTITY_NAME, EntityWriteResult::OPERATION_INSERT, null, null);
+        $subscriber->onOrderWritten(new EntityWrittenEvent(OrderDefinition::ENTITY_NAME, [$write], $context));
+    }
+
 }

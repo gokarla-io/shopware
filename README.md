@@ -221,6 +221,41 @@ Access the development shop:
 
 For detailed development guidelines, see [CLAUDE.md](CLAUDE.md).
 
+## Historical ERP migrations
+
+In **Extensions → My extensions → Karla Delivery → Configuration**, select the
+intended sales channel. Under **Historical migration protection**:
+
+1. Set **Original order date cutoff** to the first order timestamp that should
+   remain active. The comparison is strictly before the cutoff; orders exactly
+   at the cutoff are included in normal processing. The datetime control uses
+   the administrator's timezone and stores an ISO timestamp with timezone.
+2. Turn on **Enable migration protection** and save **before** starting the ERP
+   export. Repeat for each affected sales channel, or configure All sales channels
+   deliberately. Shopware's usual channel overrides and inheritance apply.
+3. Test one historical delivery update and one current order. Historical order
+   and delivery writes must produce no Karla order request or trackpage write;
+   current orders retain their existing behavior. Authenticated shipment webhooks
+   for excluded orders return HTTP 200 with `reason: migration_protection` and do
+   not trigger Shopware Flow Builder. Claim events remain unchanged.
+4. Keep protection enabled until all migration writes, importer retries and
+   in-flight shipment events have finished. Disable it only when historical
+   orders will no longer be updated or emit events. Disabling does not replay
+   skipped records, but future writes/events will process normally again.
+
+The cutoff uses the stored order's original `orderDateTime`, **not** the delivery's
+last-modified timestamp. No shop or cutoff is built in; protection is off by
+default. An enabled setting with a missing/invalid cutoff blocks all order sync
+and shipment flows in that channel and logs an error. Enter a valid cutoff to
+restore current-order processing. API-configured cutoffs must be ISO timestamps
+with an explicit timezone (for example `2026-01-01T00:00:00Z`).
+
+This plugin guard does not cancel emails or delayed Flow Builder actions already
+queued before activation, stop other email integrations, or unregister tracking
+already sent to Karla. Check those separately if an import has already started.
+The existing **Historical delivery cutoff** remains independent and unchanged.
+No Karla backend update is required for this plugin guard.
+
 ## Versioning
 
 We use [SemVer](http://semver.org/) for versioning. For the versions available, see the tags on this repository.
@@ -228,3 +263,26 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 ## License
 
 This project is licensed under the Apache-2.0 License - see the [LICENSE](LICENSE) file for details.
+
+### Independent brands on one Shopware installation
+
+Use a separate sales channel and Karla shop for each brand. Set the shop slug and
+API credentials in that sales channel's plugin configuration. Existing
+`salesChannelMapping` entries take precedence over the configured shop slug.
+
+Enable webhooks separately in each channel. Channel subscriptions use
+`/api/karla/webhooks/{salesChannelId}/{webhookId}` and a dedicated signing secret;
+a channel callback only dispatches events for orders belonging to that channel.
+The existing global callback continues to support single-shop installations.
+Inherited global subscriptions are never reused or deleted by a channel toggle.
+
+For channel subscriptions created before this update, disable and re-enable
+webhooks **in that channel** to register the new callback. Verify the correct
+Karla shop and credentials before doing so. Changing those credentials or the
+shop mapping requires recreating the subscription against the intended shop.
+
+Before launching a second brand, test one order and fulfillment per channel.
+Verify each order reaches its own Karla shop, its tracking link opens the right
+brand, and its webhook triggers the correct language, sender and email template.
+Confirm both endpoints return successful responses. A code release alone does
+not verify a merchant's installed plugin version or webhook health.

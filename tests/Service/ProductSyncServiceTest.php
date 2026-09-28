@@ -12,6 +12,7 @@ use Psr\Log\LoggerInterface;
 use Shopware\Core\Content\Product\ProductCollection;
 use Shopware\Core\Content\Product\ProductEntity;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -57,6 +58,16 @@ class ProductSyncServiceTest extends TestCase
         );
     }
 
+    public function testHasVariantsQueriesOnlyLiveVersion(): void
+    {
+        $id = \Shopware\Core\Framework\Uuid\Uuid::randomHex();
+        $this->connectionMock->expects($this->exactly(2))->method('fetchOne')
+            ->with('SELECT 1 FROM product WHERE parent_id = ? AND version_id = ? LIMIT 1', [hex2bin($id), hex2bin(\Shopware\Core\Defaults::LIVE_VERSION)])
+            ->willReturnOnConsecutiveCalls(1, false);
+        $this->assertTrue($this->service->hasVariants($id));
+        $this->assertFalse($this->service->hasVariants($id));
+    }
+
     public function testSyncProductBatchWithProducts(): void
     {
         // Mock product (standalone - no parent, no children)
@@ -82,6 +93,7 @@ class ProductSyncServiceTest extends TestCase
 
         $this->productRepositoryMock->expects($this->once())
             ->method('search')
+            ->with($this->callback(fn (Criteria $criteria): bool => $criteria->getTotalCountMode() === Criteria::TOTAL_COUNT_MODE_EXACT), $this->anything())
             ->willReturn($searchResult);
 
         // Mock config

@@ -33,7 +33,26 @@ class SyncAllProductsMessageHandler
 
     public function __invoke(SyncAllProductsMessage $message): void
     {
+        $salesChannelId = $message->getSalesChannelId();
+
         try {
+            if ($salesChannelId === null && ($channels = $this->productSyncService->getSalesChannelIds()) !== null) {
+                foreach ($channels as $channel) {
+                    if ($this->systemConfigService->get('KarlaDelivery.config.productSyncEnabled', $channel)) {
+                        $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'running', $channel);
+                        $this->messageBus->dispatch(new SyncAllProductsMessage(0, $message->getLimit(), $channel));
+                    }
+                }
+
+                // The coordinator is complete; each channel owns its sync result.
+                $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'completed');
+
+                return;
+            }
+            if (! $this->systemConfigService->get('KarlaDelivery.config.productSyncEnabled', $salesChannelId)) {
+                return;
+            }
+
             $this->logger->info('Processing product bulk sync batch', [
                 'component' => 'product.bulk_sync',
                 'offset' => $message->getOffset(),
@@ -42,14 +61,16 @@ class SyncAllProductsMessageHandler
 
             $hasMore = $this->productSyncService->syncProductBatch(
                 $message->getOffset(),
-                $message->getLimit()
+                $message->getLimit(),
+                $salesChannelId
             );
 
             // If there are more products, dispatch another message for the next batch
             if ($hasMore) {
                 $nextMessage = new SyncAllProductsMessage(
                     $message->getOffset() + $message->getLimit(),
-                    $message->getLimit()
+                    $message->getLimit(),
+                    $salesChannelId
                 );
                 $this->messageBus->dispatch($nextMessage);
 
@@ -59,7 +80,7 @@ class SyncAllProductsMessageHandler
                 ]);
             } else {
                 // All done!
-                $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'completed');
+                $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'completed', $salesChannelId);
 
                 $this->logger->info('Product bulk sync completed', [
                     'component' => 'product.bulk_sync',
@@ -67,7 +88,7 @@ class SyncAllProductsMessageHandler
                 ]);
             }
         } catch (\Throwable $t) {
-            $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'failed');
+            $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'failed', $salesChannelId);
 
             $this->logger->error('Error during product bulk sync batch', [
                 'component' => 'product.bulk_sync',

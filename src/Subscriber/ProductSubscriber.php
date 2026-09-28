@@ -47,20 +47,31 @@ class ProductSubscriber implements EventSubscriberInterface
      */
     public function onProductWritten(EntityWrittenEvent $event): void
     {
+        try {
+            foreach ($this->productSyncService->getSalesChannelIds() ?? [null] as $salesChannelId) {
+                $this->processProductWritten($event, $salesChannelId);
+            }
+        } catch (\Throwable $error) {
+            $this->logger->error('Unable to resolve product sync channels', ['error' => $error->getMessage()]);
+        }
+    }
+
+    private function processProductWritten(EntityWrittenEvent $event, ?string $salesChannelId): void
+    {
         // Skip if product sync is disabled
-        $productSyncEnabled = $this->systemConfigService->get('KarlaDelivery.config.productSyncEnabled') ?? false;
+        $productSyncEnabled = $this->systemConfigService->get('KarlaDelivery.config.productSyncEnabled', $salesChannelId) ?? false;
         if (! $productSyncEnabled) {
             return;
         }
 
         try {
             // Verify API configuration
-            $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug') ?? '';
-            $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername') ?? '';
-            $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey') ?? '';
-            $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl') ?? '';
+            $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug', $salesChannelId) ?? '';
+            $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId) ?? '';
+            $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId) ?? '';
+            $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId) ?? '';
 
-            if (empty($shopSlug) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
+            if (($salesChannelId === null && empty($shopSlug)) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
                 $this->logger->warning('Product sync skipped - missing configuration', [
                     'component' => 'product.sync',
                 ]);
@@ -68,10 +79,12 @@ class ProductSubscriber implements EventSubscriberInterface
                 return;
             }
 
-            $context = $event->getContext();
+            $context = clone $event->getContext();
+            $context->setConsiderInheritance($salesChannelId !== null);
             $productIds = $event->getIds();
 
             $criteria = new Criteria($productIds);
+            $this->productSyncService->scopeCriteria($criteria, $salesChannelId);
             $criteria->addAssociations([
                 'cover.media',
                 'manufacturer',
@@ -89,8 +102,9 @@ class ProductSubscriber implements EventSubscriberInterface
                     continue;
                 }
 
-                // Check if this is a parent product with variants
-                if ($product->getParentId() === null && $product->getChildCount() > 0) {
+                // The indexed child count can lag behind newly created variants.
+                if ($product->getParentId() === null && ($product->getChildCount() > 0
+                    || $this->productSyncService->hasVariants($product->getId()))) {
                     // This is a parent - we need to sync all its variants instead
                     $this->logger->debug('Product is a parent with variants, syncing variants', [
                         'component' => 'product.sync',
@@ -100,6 +114,7 @@ class ProductSubscriber implements EventSubscriberInterface
 
                     // Query for all variants of this parent
                     $variantCriteria = new Criteria();
+                    $this->productSyncService->scopeCriteria($variantCriteria, $salesChannelId);
                     $variantCriteria->addFilter(new \Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter(
                         'parentId',
                         $product->getId()
@@ -124,7 +139,7 @@ class ProductSubscriber implements EventSubscriberInterface
                     // Sync each variant with the parent entity
                     /** @var ProductEntity $variant */
                     foreach ($variants as $variant) {
-                        $this->productSyncService->upsertProduct($variant, $product);
+                        $this->productSyncService->upsertProduct($variant, $product, $salesChannelId);
 
                         $this->logger->info('Variant synced to Karla', [
                             'component' => 'product.sync',
@@ -134,7 +149,7 @@ class ProductSubscriber implements EventSubscriberInterface
                     }
                 } else {
                     // Regular product or variant - sync it
-                    $this->productSyncService->upsertProduct($product);
+                    $this->productSyncService->upsertProduct($product, null, $salesChannelId);
 
                     $this->logger->info('Product synced to Karla', [
                         'component' => 'product.sync',
@@ -159,20 +174,31 @@ class ProductSubscriber implements EventSubscriberInterface
      */
     public function onProductDeleted(EntityDeletedEvent $event): void
     {
+        try {
+            foreach ($this->productSyncService->getSalesChannelIds() ?? [null] as $salesChannelId) {
+                $this->processProductDeleted($event, $salesChannelId);
+            }
+        } catch (\Throwable $error) {
+            $this->logger->error('Unable to resolve product sync channels', ['error' => $error->getMessage()]);
+        }
+    }
+
+    private function processProductDeleted(EntityDeletedEvent $event, ?string $salesChannelId): void
+    {
         // Skip if product sync is disabled
-        $productSyncEnabled = $this->systemConfigService->get('KarlaDelivery.config.productSyncEnabled') ?? false;
+        $productSyncEnabled = $this->systemConfigService->get('KarlaDelivery.config.productSyncEnabled', $salesChannelId) ?? false;
         if (! $productSyncEnabled) {
             return;
         }
 
         try {
             // Verify API configuration
-            $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug') ?? '';
-            $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername') ?? '';
-            $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey') ?? '';
-            $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl') ?? '';
+            $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug', $salesChannelId) ?? '';
+            $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId) ?? '';
+            $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId) ?? '';
+            $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId) ?? '';
 
-            if (empty($shopSlug) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
+            if (($salesChannelId === null && empty($shopSlug)) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
                 $this->logger->warning('Product deletion sync skipped - missing configuration', [
                     'component' => 'product.sync',
                 ]);
@@ -184,7 +210,7 @@ class ProductSubscriber implements EventSubscriberInterface
 
             foreach ($productIds as $productId) {
                 // We can't get product number from a deleted entity, use ID
-                $this->productSyncService->deleteProduct($productId);
+                $this->productSyncService->deleteProduct($productId, $salesChannelId);
 
                 $this->logger->info('Product deleted from Karla', [
                     'component' => 'product.sync',
