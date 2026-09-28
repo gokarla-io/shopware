@@ -170,7 +170,6 @@ class TrackpageUrlServiceTest extends TestCase
         self::assertFalse($context->hasState(TrackpageUrlService::CONTEXT_STATE));
     }
 
-    /** @param array<string, mixed> $customFields */
     public function testTwoBrandsUseTheirOwnTrackingCredentialsOnOneService(): void
     {
         $config = $this->createMock(SystemConfigService::class);
@@ -205,6 +204,7 @@ class TrackpageUrlServiceTest extends TestCase
         $service->ensureForOrder($orders[1], 'second', Context::createDefaultContext());
     }
 
+    /** @param array<string, mixed> $customFields */
     private function createOrder(array $customFields = []): OrderEntity
     {
         $order = new OrderEntity();
