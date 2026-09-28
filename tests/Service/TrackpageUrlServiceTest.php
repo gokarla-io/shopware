@@ -170,12 +170,47 @@ class TrackpageUrlServiceTest extends TestCase
         self::assertFalse($context->hasState(TrackpageUrlService::CONTEXT_STATE));
     }
 
+    public function testTwoBrandsUseTheirOwnTrackingCredentialsOnOneService(): void
+    {
+        $config = $this->createMock(SystemConfigService::class);
+        $orders = [$this->createOrder(), $this->createOrder()];
+        $channels = [$orders[0]->getSalesChannelId() => 'first', $orders[1]->getSalesChannelId() => 'second'];
+        $config->method('get')->willReturnCallback(static function (string $key, ?string $channel = null) use ($channels) {
+            $brand = $channels[$channel] ?? 'global';
+
+            return match ($key) {
+                'KarlaDelivery.config.apiUsername' => $brand . '-user',
+                'KarlaDelivery.config.apiKey' => $brand . '-key',
+                'KarlaDelivery.config.apiUrl' => 'https://' . $brand . '.example/',
+                'KarlaDelivery.config.requestTimeout' => 7.0,
+                default => null,
+            };
+        });
+        $seen = [];
+        $response = $this->createResponse(200, json_encode(['url' => self::SIGNED_URL], JSON_THROW_ON_ERROR));
+        $this->httpClient->expects(self::exactly(2))->method('request')->willReturnCallback(
+            static function (string $method, string $url, array $options) use (&$seen, $response) {
+                $brand = count($seen) === 0 ? 'first' : 'second';
+                self::assertSame('https://' . $brand . '.example/v1/shops/' . $brand . '/orders/trackpage-url', $url);
+                self::assertSame([$brand . '-user', $brand . '-key'], $options['auth_basic']);
+                self::assertSame(7.0, $options['timeout']);
+                $seen[] = $brand;
+
+                return $response;
+            },
+        );
+        $service = new TrackpageUrlService($config, $this->httpClient, $this->orderRepository, $this->logger);
+        $service->ensureForOrder($orders[0], 'first', Context::createDefaultContext());
+        $service->ensureForOrder($orders[1], 'second', Context::createDefaultContext());
+    }
+
     /** @param array<string, mixed> $customFields */
     private function createOrder(array $customFields = []): OrderEntity
     {
         $order = new OrderEntity();
         $order->setId(Uuid::randomHex());
         $order->setOrderNumber('10001');
+        $order->setSalesChannelId(Uuid::randomHex());
         $order->setCustomFields($customFields);
 
         return $order;

@@ -123,7 +123,7 @@ class OrderSubscriber implements EventSubscriberInterface
      * @param TrackpageUrlService $trackpageUrlService
      */
     public function __construct(
-        SystemConfigService $systemConfigService,
+        private readonly SystemConfigService $systemConfigService,
         LoggerInterface $logger,
         EntityRepository $orderRepository,
         EntityRepository $orderDeliveryRepository,
@@ -432,15 +432,6 @@ class OrderSubscriber implements EventSubscriberInterface
             : 'order.sync';
 
         try {
-            if (! $this->isConfigured()) {
-                $this->logger->warning('Order sync skipped - missing configuration', [
-                    'component' => $component,
-                    'trigger_source' => $triggerSource,
-                ]);
-
-                return;
-            }
-
             $criteria = new Criteria($orderIds);
             $criteria->addAssociations([
                 'addresses.country',
@@ -502,17 +493,6 @@ class OrderSubscriber implements EventSubscriberInterface
     }
 
     /**
-     * Check if the plugin has valid API configuration
-     */
-    private function isConfigured(): bool
-    {
-        return ! empty($this->shopSlug)
-            && ! empty($this->apiUsername)
-            && ! empty($this->apiKey)
-            && ! empty($this->apiUrl);
-    }
-
-    /**
      * Upsert and optionally fulfill an order through Karla's API
      * @param OrderEntity $order
      * @param OrderDeliveryCollection $deliveries Array of OrderDeliveryEntity objects
@@ -529,6 +509,21 @@ class OrderSubscriber implements EventSubscriberInterface
         bool $skipOrderStatusCheck,
         ?array $deliveryIds
     ): void {
+        $channel = $order->getSalesChannelId() ?: null;
+        $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $channel) ?? $this->apiUsername;
+        $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $channel) ?? $this->apiKey;
+        $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $channel) ?? $this->apiUrl;
+        $shopSlug = $this->getShopSlugForSalesChannel($channel);
+        if (! $shopSlug || ! $apiUsername || ! $apiKey || ! $apiUrl) {
+            $this->logger->warning('Order sync skipped - missing configuration', [
+                'component' => 'order.sync',
+                'trigger_source' => $triggerSource,
+                'sales_channel_id' => $channel,
+            ]);
+
+            return;
+        }
+
         $orderNumber = $order->getOrderNumber();
         $orderStatus = $order->getStateMachineState()->getTechnicalName();
 
@@ -675,14 +670,16 @@ class OrderSubscriber implements EventSubscriberInterface
             return;
         }
 
-        $shopSlug = $this->getShopSlugForSalesChannel($order->getSalesChannelId());
-        $url = $this->apiUrl . '/v1/shops/' . $shopSlug . '/orders';
+        $url = rtrim($apiUrl, '/') . '/v1/shops/' . rawurlencode($shopSlug) . '/orders';
         $this->sendRequestToKarlaApi($url, 'PUT', $orderUpsertPayload, [
             'component' => 'order.api',
             'order_number' => $orderNumber,
             'trigger_source' => $triggerSource,
             'tracking_count' => count($orderUpsertPayload['trackings']),
-        ]);
+        ], $apiUsername, $apiKey, (float) ($this->systemConfigService->get(
+            'KarlaDelivery.config.requestTimeout',
+            $channel
+        ) ?? $this->requestTimeout));
 
         $this->logger->info('Order synced to Karla successfully', [
             'component' => 'order.sync',
@@ -750,10 +747,13 @@ class OrderSubscriber implements EventSubscriberInterface
         string $url,
         string $method,
         array $orderData,
-        array $logContext
+        array $logContext,
+        string $apiUsername,
+        string $apiKey,
+        float $requestTimeout
     ): void {
         $jsonPayload = json_encode($orderData, JSON_THROW_ON_ERROR);
-        $auth = base64_encode($this->apiUsername . ':' . $this->apiKey);
+        $auth = base64_encode($apiUsername . ':' . $apiKey);
         $headers = [
             'Authorization' => 'Basic ' . $auth,
             'Content-Type' => 'application/json',
@@ -772,7 +772,7 @@ class OrderSubscriber implements EventSubscriberInterface
             $response = $this->httpClient->request($method, $url, [
                 'headers' => $headers,
                 'body' => $jsonPayload,
-                'timeout' => $this->requestTimeout,
+                'timeout' => $requestTimeout,
             ]);
 
             // Get status code (can throw on network errors)
@@ -1087,6 +1087,6 @@ class OrderSubscriber implements EventSubscriberInterface
             ]);
         }
 
-        return $this->shopSlug;
+        return (string) ($this->systemConfigService->get('KarlaDelivery.config.shopSlug', $salesChannelId) ?? $this->shopSlug);
     }
 }

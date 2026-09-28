@@ -1438,7 +1438,7 @@ class OrderSubscriberTest extends TestCase
         $systemConfigMock->method('get')->willReturnMap([
             // API config - initially set for constructor, but simulates being cleared
             ['KarlaDelivery.config.shopSlug', null, 'testSlug'], // Set for constructor
-            ['KarlaDelivery.config.apiUsername', null, 'testUser'],
+            ['KarlaDelivery.config.apiUsername', null, ''],
             ['KarlaDelivery.config.apiKey', null, 'testKey'],
             ['KarlaDelivery.config.apiUrl', null, 'https://api.example.com'],
             ['KarlaDelivery.config.requestTimeout', null, 10.5],
@@ -1466,12 +1466,6 @@ class OrderSubscriberTest extends TestCase
             $this->httpClientMock,
             $this->trackpageUrlServiceMock
         );
-
-        // Use reflection to set shopSlug to empty to trigger the early return
-        $reflection = new \ReflectionClass($orderSubscriber);
-        $shopSlugProperty = $reflection->getProperty('shopSlug');
-        $shopSlugProperty->setAccessible(true);
-        $shopSlugProperty->setValue($orderSubscriber, '');
 
         $orderEntity = $this->createOrderEntityMock();
         $event = $this->mockOrderEvent(
@@ -3719,4 +3713,61 @@ class OrderSubscriberTest extends TestCase
 
         return new OrderDeliveryCollection([$delivery]);
     }
+    public function testTwoBrandOrdersUseChannelCredentialsWithoutGlobalShopConfiguration(): void
+    {
+        $first = $this->createOrderMock(orderNumber: 'brand-a');
+        $second = $this->createOrderMock(orderNumber: 'brand-b');
+        $first->method('getUniqueIdentifier')->willReturn($first->getId());
+        $second->method('getUniqueIdentifier')->willReturn($second->getId());
+        $channels = [$first->getSalesChannelId() => 'first', $second->getSalesChannelId() => 'second'];
+        $defaults = [];
+        foreach (ConfigBuilder::create()->buildMap() as [$key, $scope, $value]) {
+            $defaults[$key] = $value;
+        }
+        $defaults['KarlaDelivery.config.shopSlug'] = '';
+        $defaults['KarlaDelivery.config.salesChannelMapping'] = $second->getSalesChannelId() . ':mapped-second';
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturnCallback(static function (string $key, ?string $channel = null) use ($channels, $defaults) {
+            if (! isset($channels[$channel])) {
+                return $defaults[$key] ?? null;
+            }
+            $brand = $channels[$channel];
+
+            return match ($key) {
+                'KarlaDelivery.config.shopSlug' => $brand,
+                'KarlaDelivery.config.apiUsername' => $brand . '-user',
+                'KarlaDelivery.config.apiKey' => $brand . '-key',
+                'KarlaDelivery.config.apiUrl' => 'https://' . $brand . '.example',
+                default => $defaults[$key] ?? null,
+            };
+        });
+        $context = Context::createDefaultContext();
+        $this->orderRepositoryMock->method('search')->willReturn(new EntitySearchResult(
+            'order',
+            2,
+            new OrderCollection([$first, $second]),
+            null,
+            new Criteria(),
+            $context,
+        ));
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn(200);
+        $seen = [];
+        $this->httpClientMock->expects(self::exactly(2))->method('request')->willReturnCallback(
+            static function (string $method, string $url, array $options) use (&$seen, $response) {
+                $brand = count($seen) === 0 ? 'first' : 'second';
+                $slug = $brand === 'first' ? 'first' : 'mapped-second';
+                self::assertSame('https://' . $brand . '.example/v1/shops/' . $slug . '/orders', $url);
+                self::assertSame('Basic ' . base64_encode($brand . '-user:' . $brand . '-key'), $options['headers']['Authorization']);
+                $seen[] = $brand;
+
+                return $response;
+            },
+        );
+        $this->trackpageUrlServiceMock->expects(self::exactly(2))->method('ensureForOrder');
+        $subscriber = new OrderSubscriber($config, $this->loggerMock, $this->orderRepositoryMock, $this->orderDeliveryRepositoryMock, $this->httpClientMock, $this->trackpageUrlServiceMock);
+        $write = new EntityWriteResult($first->getId(), ['id' => $first->getId()], OrderDefinition::ENTITY_NAME, EntityWriteResult::OPERATION_INSERT, null, null);
+        $subscriber->onOrderWritten(new EntityWrittenEvent(OrderDefinition::ENTITY_NAME, [$write], $context));
+    }
+
 }
