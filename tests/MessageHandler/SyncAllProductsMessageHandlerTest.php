@@ -40,6 +40,7 @@ final class SyncAllProductsMessageHandlerTest extends TestCase
         $this->loggerMock = $this->createMock(LoggerInterface::class);
         $this->messageBusMock = $this->createMock(MessageBusInterface::class);
         $this->systemConfigServiceMock = $this->createMock(SystemConfigService::class);
+        $this->systemConfigServiceMock->method('get')->willReturn(true);
 
         $this->handler = new SyncAllProductsMessageHandler(
             $this->productSyncServiceMock,
