@@ -23,7 +23,7 @@ class TrackpageUrlService
     private readonly float $requestTimeout;
 
     public function __construct(
-        SystemConfigService $systemConfigService,
+        private readonly SystemConfigService $systemConfigService,
         private readonly HttpClientInterface $httpClient,
         private readonly EntityRepository $orderRepository,
         private readonly LoggerInterface $logger,
@@ -41,7 +41,12 @@ class TrackpageUrlService
             return;
         }
 
-        if ($this->apiUsername === '' || $this->apiKey === '' || $this->apiUrl === '' || $shopSlug === '') {
+        $channel = $order->getSalesChannelId() ?: null;
+        $apiUsername = (string) ($this->systemConfigService->get('KarlaDelivery.config.apiUsername', $channel) ?? $this->apiUsername);
+        $apiKey = (string) ($this->systemConfigService->get('KarlaDelivery.config.apiKey', $channel) ?? $this->apiKey);
+        $apiUrl = rtrim((string) ($this->systemConfigService->get('KarlaDelivery.config.apiUrl', $channel) ?? $this->apiUrl), '/');
+        $timeout = (float) ($this->systemConfigService->get('KarlaDelivery.config.requestTimeout', $channel) ?? $this->requestTimeout);
+        if ($apiUsername === '' || $apiKey === '' || $apiUrl === '' || $shopSlug === '') {
             $this->logger->warning('Signed tracking URL skipped - missing configuration', [
                 'component' => 'order.trackpage_url',
                 'order_number' => $order->getOrderNumber(),
@@ -54,14 +59,14 @@ class TrackpageUrlService
         try {
             $response = $this->httpClient->request(
                 'POST',
-                $this->apiUrl . '/v1/shops/' . rawurlencode($shopSlug) . '/orders/trackpage-url',
+                $apiUrl . '/v1/shops/' . rawurlencode($shopSlug) . '/orders/trackpage-url',
                 [
-                    'auth_basic' => [$this->apiUsername, $this->apiKey],
+                    'auth_basic' => [$apiUsername, $apiKey],
                     'json' => [
                         'id' => $order->getId(),
                         'id_type' => 'external_id',
                     ],
-                    'timeout' => $this->requestTimeout,
+                    'timeout' => $timeout,
                 ]
             );
             $statusCode = $response->getStatusCode();
