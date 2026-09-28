@@ -93,6 +93,7 @@ class ProductSyncService
         $criteria->setOffset($offset);
         $criteria->setLimit($limit);
         $this->scopeCriteria($criteria, $salesChannelId);
+        $criteria->setTotalCountMode(Criteria::TOTAL_COUNT_MODE_EXACT);
 
         // Only sync active products
         $criteria->addFilter(new EqualsFilter('active', true));

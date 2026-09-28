@@ -12,6 +12,7 @@ use Psr\Log\LoggerInterface;
 use Shopware\Core\Content\Product\ProductCollection;
 use Shopware\Core\Content\Product\ProductEntity;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -92,6 +93,7 @@ class ProductSyncServiceTest extends TestCase
 
         $this->productRepositoryMock->expects($this->once())
             ->method('search')
+            ->with($this->callback(fn (Criteria $criteria): bool => $criteria->getTotalCountMode() === Criteria::TOTAL_COUNT_MODE_EXACT), $this->anything())
             ->willReturn($searchResult);
 
         // Mock config
