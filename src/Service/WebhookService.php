@@ -31,7 +31,7 @@ class WebhookService
      * endpoint URL. This is NOT the Karla webhook UUID (which comes from Karla API),
      * nor the Karla shop slug. It's simply a unique path segment for our endpoint.
      */
-    public function generateWebhookUrl(string $baseUrl): string
+    public function generateWebhookUrl(string $baseUrl, ?string $salesChannelId = null): string
     {
         // Ensure HTTPS for security (webhooks should never use HTTP)
         $baseUrl = preg_replace('/^http:\/\//i', 'https://', $baseUrl);
@@ -39,7 +39,7 @@ class WebhookService
         // Generate random 32-character hex string as Shopware webhook identifier
         $shopwareWebhookId = bin2hex(random_bytes(16));
 
-        return rtrim($baseUrl, '/') . '/api/karla/webhooks/' . $shopwareWebhookId;
+        return rtrim($baseUrl, '/') . '/api/karla/webhooks/' . ($salesChannelId ? $salesChannelId . '/' : '') . $shopwareWebhookId;
     }
 
     /**
@@ -53,10 +53,10 @@ class WebhookService
      *
      * @throws \RuntimeException
      */
-    public function createWebhook(string $url, array $enabledEvents): array
+    public function createWebhook(string $url, array $enabledEvents, ?string $salesChannelId = null): array
     {
-        $config = $this->getRequiredConfig();
-        $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode');
+        $config = $this->getRequiredConfig($salesChannelId);
+        $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode', $salesChannelId);
 
         if ($debugMode) {
             $this->logger->debug('Creating webhook in Karla API', [
@@ -129,10 +129,10 @@ class WebhookService
      *
      * @throws \RuntimeException
      */
-    public function updateWebhook(string $webhookId, string $url, array $enabledEvents): void
+    public function updateWebhook(string $webhookId, string $url, array $enabledEvents, ?string $salesChannelId = null): void
     {
-        $config = $this->getRequiredConfig();
-        $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode');
+        $config = $this->getRequiredConfig($salesChannelId);
+        $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode', $salesChannelId);
 
         if ($debugMode) {
             $this->logger->debug('Updating webhook in Karla API', [
@@ -192,10 +192,10 @@ class WebhookService
      *
      * @throws \RuntimeException
      */
-    public function deleteWebhook(string $webhookId): void
+    public function deleteWebhook(string $webhookId, ?string $salesChannelId = null): void
     {
-        $config = $this->getRequiredConfig();
-        $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode');
+        $config = $this->getRequiredConfig($salesChannelId);
+        $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode', $salesChannelId);
 
         if ($debugMode) {
             $this->logger->debug('Deleting webhook in Karla API', [
@@ -252,12 +252,18 @@ class WebhookService
      *
      * @throws \RuntimeException
      */
-    private function getRequiredConfig(): array
+    private function getRequiredConfig(?string $salesChannelId): array
     {
-        $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug');
-        $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername');
-        $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey');
-        $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl');
+        $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug', $salesChannelId);
+        foreach (explode(',', (string) $this->systemConfigService->get('KarlaDelivery.config.salesChannelMapping')) as $pair) {
+            $mapping = array_map('trim', explode(':', $pair));
+            if ($salesChannelId && count($mapping) === 2 && $mapping[0] === $salesChannelId && $mapping[1] !== '') {
+                $shopSlug = $mapping[1];
+            }
+        }
+        $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId);
+        $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId);
+        $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId);
 
         if (! $shopSlug || ! $apiUsername || ! $apiKey || ! $apiUrl) {
             $operation = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2)[1]['function'] ?? 'unknown';

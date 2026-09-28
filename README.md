@@ -228,3 +228,26 @@ We use [SemVer](http://semver.org/) for versioning. For the versions available, 
 ## License
 
 This project is licensed under the Apache-2.0 License - see the [LICENSE](LICENSE) file for details.
+
+### Independent brands on one Shopware installation
+
+Use a separate sales channel and Karla shop for each brand. Set the shop slug and
+API credentials in that sales channel's plugin configuration. Existing
+`salesChannelMapping` entries take precedence over the configured shop slug.
+
+Enable webhooks separately in each channel. Channel subscriptions use
+`/api/karla/webhooks/{salesChannelId}/{webhookId}` and a dedicated signing secret;
+a channel callback only dispatches events for orders belonging to that channel.
+The existing global callback continues to support single-shop installations.
+Inherited global subscriptions are never reused or deleted by a channel toggle.
+
+For channel subscriptions created before this update, disable and re-enable
+webhooks **in that channel** to register the new callback. Verify the correct
+Karla shop and credentials before doing so. Changing those credentials or the
+shop mapping requires recreating the subscription against the intended shop.
+
+Before launching a second brand, test one order and fulfillment per channel.
+Verify each order reaches its own Karla shop, its tracking link opens the right
+brand, and its webhook triggers the correct language, sender and email template.
+Confirm both endpoints return successful responses. A code release alone does
+not verify a merchant's installed plugin version or webhook health.

@@ -50,9 +50,31 @@ class WebhookController extends AbstractController
         defaults: ['_routeScope' => ['api'], 'auth_required' => false],
         methods: ['POST'],
     )]
-    public function handleWebhook(Request $request, string $shopwareWebhookId, Context $context): JsonResponse
-    {
-        $debugMode = (bool) $this->systemConfigService->get('KarlaDelivery.config.debugMode');
+    #[Route(
+        path: '/api/karla/webhooks/{salesChannelId}/{shopwareWebhookId}',
+        name: 'api.karla.webhook.sales_channel',
+        defaults: ['_routeScope' => ['api'], 'auth_required' => false],
+        requirements: ['salesChannelId' => '[a-f0-9]{32}'],
+        methods: ['POST'],
+    )]
+    public function handleWebhook(
+        Request $request,
+        string $shopwareWebhookId,
+        Context $context,
+        ?string $salesChannelId = null,
+    ): JsonResponse {
+        // Secrets and subscription identity must never inherit from another channel.
+        $channelConfig = $salesChannelId === null ? [] : $this->systemConfigService->getDomain(
+            'KarlaDelivery.config',
+            $salesChannelId,
+        );
+        if ($salesChannelId !== null && parse_url(
+            (string) ($channelConfig['KarlaDelivery.config.webhookUrl'] ?? ''),
+            PHP_URL_PATH,
+        ) !== '/api/karla/webhooks/' . $salesChannelId . '/' . $shopwareWebhookId) {
+            return new JsonResponse(['status' => 'error', 'message' => 'Unknown webhook'], Response::HTTP_NOT_FOUND);
+        }
+        $debugMode = (bool) $this->systemConfigService->get('KarlaDelivery.config.debugMode', $salesChannelId);
 
         if ($debugMode) {
             $this->logger->debug('Webhook request received', [
@@ -64,7 +86,9 @@ class WebhookController extends AbstractController
         }
 
         // Check if webhook receiver is enabled
-        $webhookEnabled = $this->systemConfigService->get('KarlaDelivery.config.webhookEnabled');
+        $webhookEnabled = $salesChannelId === null
+            ? $this->systemConfigService->get('KarlaDelivery.config.webhookEnabled')
+            : ($channelConfig['KarlaDelivery.config.webhookEnabled'] ?? false);
         if (! $webhookEnabled) {
             $this->logger->warning('Webhook receiver is disabled', [
                 'component' => 'webhook.receiver',
@@ -77,11 +101,13 @@ class WebhookController extends AbstractController
         }
 
         // Get webhook secret
-        $webhookSecret = $this->systemConfigService->get('KarlaDelivery.config.webhookSecret');
+        $webhookSecret = $salesChannelId === null
+            ? $this->systemConfigService->get('KarlaDelivery.config.webhookSecret')
+            : ($channelConfig['KarlaDelivery.config.webhookSecret'] ?? null);
 
         // Verify signature
         $signature = $request->headers->get('Karla-Signature');
-        if (! $signature) {
+        if (! $signature || ! is_string($webhookSecret) || $webhookSecret === '') {
             $this->logger->warning('Webhook signature missing', [
                 'component' => 'webhook.receiver',
             ]);
@@ -162,6 +188,12 @@ class WebhookController extends AbstractController
 
             // Create and dispatch event (validation happens in getName())
             $event = $this->eventFactory->create($data, $context);
+            if ($salesChannelId !== null && $event->getSalesChannelId() !== $salesChannelId) {
+                return new JsonResponse(
+                    ['status' => 'error', 'message' => 'Order belongs to another sales channel'],
+                    Response::HTTP_FORBIDDEN,
+                );
+            }
             $eventName = $event->getName(); // Technical name: karla.shipment.in_transit
 
             if ($debugMode) {
