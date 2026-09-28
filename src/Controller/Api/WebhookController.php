@@ -188,6 +188,9 @@ class WebhookController extends AbstractController
 
             // Create and dispatch event (validation happens in getName())
             $event = $this->eventFactory->create($data, $context);
+            if ($event === null) {
+                return new JsonResponse(['status' => 'suppressed', 'reason' => 'migration_protection'], Response::HTTP_OK);
+            }
             if ($salesChannelId !== null && $event->getSalesChannelId() !== $salesChannelId) {
                 return new JsonResponse(
                     ['status' => 'error', 'message' => 'Order belongs to another sales channel'],

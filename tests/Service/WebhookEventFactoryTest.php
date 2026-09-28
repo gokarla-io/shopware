@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Karla\Delivery\Tests\Service;
 
+use Karla\Delivery\Service\MigrationProtectionService;
 use Karla\Delivery\Service\WebhookEventFactory;
 use Karla\Delivery\Tests\Fixtures\KarlaWebhookPayloads;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -56,8 +57,9 @@ final class WebhookEventFactoryTest extends TestCase
         )->willReturn(new EntitySearchResult('order', 1, new OrderCollection([$order]), null, new Criteria(), $context));
         $payload = $guest ? KarlaWebhookPayloads::shipmentGuest() : KarlaWebhookPayloads::shipment();
         $payload['context']['order']['external_id'] = $order->getId();
-        $event = (new WebhookEventFactory($repository))->create($payload, $context);
+        $event = (new WebhookEventFactory($repository, $this->createMock(MigrationProtectionService::class)))->create($payload, $context);
 
+        self::assertNotNull($event);
         self::assertNotSame($context, $event->getContext());
         self::assertSame($expectedChain, $event->getContext()->getLanguageIdChain());
         self::assertSame([Defaults::LANGUAGE_SYSTEM], $context->getLanguageIdChain());
@@ -97,7 +99,7 @@ final class WebhookEventFactoryTest extends TestCase
         $payload['context']['order']['external_id'] = Uuid::randomHex();
         self::expectException(\RuntimeException::class);
         self::expectExceptionMessage('Shopware order not found');
-        (new WebhookEventFactory($repository))->create($payload, $context);
+        (new WebhookEventFactory($repository, $this->createMock(MigrationProtectionService::class)))->create($payload, $context);
     }
 
     public function testInvalidOrderIdDoesNotQueryRepository(): void
@@ -106,6 +108,6 @@ final class WebhookEventFactoryTest extends TestCase
         $repository->expects(self::never())->method('search');
         self::expectException(\RuntimeException::class);
         self::expectExceptionMessage('Invalid Shopware order ID');
-        (new WebhookEventFactory($repository))->create(KarlaWebhookPayloads::shipment(), Context::createDefaultContext());
+        (new WebhookEventFactory($repository, $this->createMock(MigrationProtectionService::class)))->create(KarlaWebhookPayloads::shipment(), Context::createDefaultContext());
     }
 }

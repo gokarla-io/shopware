@@ -64,6 +64,25 @@
         </input-field>
     </card>
     <card>
+        <title>Historical migration protection</title>
+        <title lang="de-DE">Schutz bei historischen Migrationen</title>
+        <input-field type="bool">
+            <name>migrationProtectionEnabled</name>
+            <label>Enable migration protection</label>
+            <label lang="de-DE">Migrationsschutz aktivieren</label>
+            <helpText>For this sales channel, skip exports and Karla shipment flows for orders placed before the cutoff. Configure the cutoff before enabling. Does not cancel already queued emails. Keep enabled until migration writes and retries have finished.</helpText>
+            <helpText lang="de-DE">Für diesen Verkaufskanal Exporte und Karla-Sendungsflows für Bestellungen vor dem Stichtag überspringen. Zuerst den Stichtag setzen. Bereits eingeplante E-Mails werden nicht abgebrochen. Bis zum Ende aller Migrationsänderungen und Wiederholungen aktiviert lassen.</helpText>
+            <defaultValue>false</defaultValue>
+        </input-field>
+        <input-field type="datetime">
+            <name>migrationOrderCutoff</name>
+            <label>Original order date cutoff</label>
+            <label lang="de-DE">Stichtag des ursprünglichen Bestelldatums</label>
+            <helpText>Orders exactly at or after this timestamp remain active. Delivery updates do not change eligibility. If enabled with a missing or invalid cutoff, all order exports and shipment flows in this channel are blocked; see Karla logs.</helpText>
+            <helpText lang="de-DE">Bestellungen ab einschließlich diesem Zeitpunkt bleiben aktiv. Lieferungsänderungen ändern die Zuordnung nicht. Bei aktiviertem Schutz ohne gültigen Stichtag werden alle Bestellexporte und Sendungsflows dieses Kanals blockiert; siehe Karla-Protokoll.</helpText>
+        </input-field>
+    </card>
+    <card>
         <title>Order Statuses</title>
         <title lang="de-DE">Bestellstatus</title>
         <input-field type="bool">

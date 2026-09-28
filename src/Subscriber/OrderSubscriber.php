@@ -6,6 +6,7 @@ namespace Karla\Delivery\Subscriber;
 
 use DateTimeImmutable;
 use DateTimeInterface;
+use Karla\Delivery\Service\MigrationProtectionService;
 use Karla\Delivery\Service\TrackpageUrlService;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Checkout\Order\Aggregate\OrderAddress\OrderAddressEntity;
@@ -129,6 +130,7 @@ class OrderSubscriber implements EventSubscriberInterface
         EntityRepository $orderDeliveryRepository,
         HttpClientInterface $httpClient,
         TrackpageUrlService $trackpageUrlService,
+        private readonly MigrationProtectionService $migrationProtection,
     ) {
         $this->logger = $logger;
         $this->orderRepository = $orderRepository;
@@ -509,6 +511,9 @@ class OrderSubscriber implements EventSubscriberInterface
         bool $skipOrderStatusCheck,
         ?array $deliveryIds
     ): void {
+        if ($this->migrationProtection->shouldSuppress($order)) {
+            return;
+        }
         $channel = $order->getSalesChannelId() ?: null;
         $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $channel) ?? $this->apiUsername;
         $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $channel) ?? $this->apiKey;
@@ -520,6 +525,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 'trigger_source' => $triggerSource,
                 'sales_channel_id' => $channel,
             ]);
+
 
             return;
         }
