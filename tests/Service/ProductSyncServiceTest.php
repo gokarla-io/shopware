@@ -57,6 +57,16 @@ class ProductSyncServiceTest extends TestCase
         );
     }
 
+    public function testHasVariantsQueriesOnlyLiveVersion(): void
+    {
+        $id = \Shopware\Core\Framework\Uuid\Uuid::randomHex();
+        $this->connectionMock->expects($this->exactly(2))->method('fetchOne')
+            ->with('SELECT 1 FROM product WHERE parent_id = ? AND version_id = ? LIMIT 1', [hex2bin($id), hex2bin(\Shopware\Core\Defaults::LIVE_VERSION)])
+            ->willReturnOnConsecutiveCalls(1, false);
+        $this->assertTrue($this->service->hasVariants($id));
+        $this->assertFalse($this->service->hasVariants($id));
+    }
+
     public function testSyncProductBatchWithProducts(): void
     {
         // Mock product (standalone - no parent, no children)

@@ -55,6 +55,11 @@ final class ProductSubscriberTest extends TestCase
         );
     }
 
+    public static function parentChildCounts(): array
+    {
+        return ['indexed' => [2], 'index pending' => [0]];
+    }
+
     /**
      * @covers ::__construct
      * @covers ::getSubscribedEvents
@@ -354,7 +359,8 @@ final class ProductSubscriberTest extends TestCase
      * @covers ::processProductWritten
      * @covers ::onProductWritten
      */
-    public function testOnProductWrittenSyncsVariantsForParentProduct(): void
+    #[\PHPUnit\Framework\Attributes\DataProvider('parentChildCounts')]
+    public function testOnProductWrittenSyncsVariantsForParentProduct(int $childCount): void
     {
         $parentId = Uuid::randomHex();
         $variant1Id = Uuid::randomHex();
@@ -374,7 +380,8 @@ final class ProductSubscriberTest extends TestCase
         $parentProduct->method('getProductNumber')->willReturn('PARENT-001');
         $parentProduct->method('getName')->willReturn('Parent Product');
         $parentProduct->method('getParentId')->willReturn(null);
-        $parentProduct->method('getChildCount')->willReturn(2);
+        $parentProduct->method('getChildCount')->willReturn($childCount);
+        $this->productSyncServiceMock->expects($childCount === 0 ? $this->once() : $this->never())->method('hasVariants')->with($parentId)->willReturn(true);
         $parentProduct->method('getId')->willReturn($parentId);
 
         // Mock variant 1

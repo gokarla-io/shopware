@@ -102,8 +102,9 @@ class ProductSubscriber implements EventSubscriberInterface
                     continue;
                 }
 
-                // Check if this is a parent product with variants
-                if ($product->getParentId() === null && $product->getChildCount() > 0) {
+                // The indexed child count can lag behind newly created variants.
+                if ($product->getParentId() === null && ($product->getChildCount() > 0
+                    || $this->productSyncService->hasVariants($product->getId()))) {
                     // This is a parent - we need to sync all its variants instead
                     $this->logger->debug('Product is a parent with variants, syncing variants', [
                         'component' => 'product.sync',

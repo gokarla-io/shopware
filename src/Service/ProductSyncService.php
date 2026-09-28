@@ -7,10 +7,12 @@ namespace Karla\Delivery\Service;
 use Doctrine\DBAL\Connection;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Content\Product\ProductEntity;
+use Shopware\Core\Defaults;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter;
+use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
 
@@ -66,6 +68,14 @@ class ProductSyncService
         if ($salesChannelId !== null) {
             $criteria->addFilter(new EqualsFilter('visibilities.salesChannelId', $salesChannelId));
         }
+    }
+
+    public function hasVariants(string $productId): bool
+    {
+        return (bool) $this->connection->fetchOne(
+            'SELECT 1 FROM product WHERE parent_id = ? AND version_id = ? LIMIT 1',
+            [Uuid::fromHexToBytes($productId), Uuid::fromHexToBytes(Defaults::LIVE_VERSION)]
+        );
     }
 
     /**
