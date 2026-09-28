@@ -70,6 +70,7 @@ final class ProductSubscriberTest extends TestCase
     }
 
     /**
+     * @covers ::processProductWritten
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenWhenDisabled(): void
@@ -85,6 +86,7 @@ final class ProductSubscriberTest extends TestCase
     }
 
     /**
+     * @covers ::processProductWritten
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenSkipsWhenConfigMissing(): void
@@ -112,6 +114,7 @@ final class ProductSubscriberTest extends TestCase
     }
 
     /**
+     * @covers ::processProductWritten
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenSyncsActiveProduct(): void
@@ -159,6 +162,7 @@ final class ProductSubscriberTest extends TestCase
     }
 
     /**
+     * @covers ::processProductWritten
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenSkipsInactiveProduct(): void
@@ -193,6 +197,7 @@ final class ProductSubscriberTest extends TestCase
     }
 
     /**
+     * @covers ::processProductWritten
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenHandlesException(): void
@@ -229,6 +234,7 @@ final class ProductSubscriberTest extends TestCase
     }
 
     /**
+     * @covers ::processProductDeleted
      * @covers ::onProductDeleted
      */
     public function testOnProductDeletedWhenDisabled(): void
@@ -244,6 +250,7 @@ final class ProductSubscriberTest extends TestCase
     }
 
     /**
+     * @covers ::processProductDeleted
      * @covers ::onProductDeleted
      */
     public function testOnProductDeletedSkipsWhenConfigMissing(): void
@@ -271,6 +278,7 @@ final class ProductSubscriberTest extends TestCase
     }
 
     /**
+     * @covers ::processProductDeleted
      * @covers ::onProductDeleted
      */
     public function testOnProductDeletedDeletesProducts(): void
@@ -308,6 +316,7 @@ final class ProductSubscriberTest extends TestCase
     }
 
     /**
+     * @covers ::processProductDeleted
      * @covers ::onProductDeleted
      */
     public function testOnProductDeletedHandlesException(): void
@@ -342,6 +351,7 @@ final class ProductSubscriberTest extends TestCase
     }
 
     /**
+     * @covers ::processProductWritten
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenSyncsVariantsForParentProduct(): void
