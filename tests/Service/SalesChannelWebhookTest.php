@@ -161,4 +161,37 @@ final class SalesChannelWebhookTest extends TestCase
         (new WebhookService($config, $client, new NullLogger()))->deleteWebhook('legacy', self::CHANNEL);
     }
 
+    public static function rotatedCredentials(): array
+    {
+        return [[204, true], [403, false]];
+    }
+
+    #[DataProvider('rotatedCredentials')]
+    public function testDeletionRetriesRevokedCredentialsWithoutChangingOwner(int $retryStatus, bool $success): void
+    {
+        $config = $this->createMock(SystemConfigService::class);
+        $saved = ['shopSlug' => 'original', 'apiUsername' => 'old-user', 'apiKey' => 'revoked-key', 'apiUrl' => 'https://api.example'];
+        $config->method('getDomain')->willReturn(['KarlaDelivery.config.webhookRegistration' => ['id' => 'subscription', 'config' => $saved]]);
+        $config->method('get')->willReturnMap([
+            ['KarlaDelivery.config.apiUrl', self::CHANNEL, 'https://api.example'],
+            ['KarlaDelivery.config.apiUsername', self::CHANNEL, 'rotated-user'],
+            ['KarlaDelivery.config.apiKey', self::CHANNEL, 'rotated-key'],
+        ]);
+        $config->expects($success ? self::once() : self::never())->method('set');
+        $client = $this->createMock(HttpClientInterface::class);
+        $attempt = 0;
+        $client->expects(self::exactly(2))->method('request')->willReturnCallback(function (string $method, string $url, array $options) use (&$attempt, $retryStatus) {
+            self::assertSame('https://api.example/v1/shops/original/webhooks/subscription', $url);
+            self::assertSame($attempt === 0 ? ['old-user', 'revoked-key'] : ['rotated-user', 'rotated-key'], $options['auth_basic']);
+            $response = $this->createMock(ResponseInterface::class);
+            $response->method('getStatusCode')->willReturn($attempt++ === 0 ? 401 : $retryStatus);
+
+            return $response;
+        });
+        if (! $success) {
+            $this->expectException(\RuntimeException::class);
+        }
+        (new WebhookService($config, $client, new NullLogger()))->deleteWebhook('subscription', self::CHANNEL);
+    }
+
 }

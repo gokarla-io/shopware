@@ -238,6 +238,20 @@ class WebhookService
             );
 
             $statusCode = $response->getStatusCode();
+            // Rotated credentials can replace a revoked registration key, but must
+            // never be sent to a different API endpoint from their configured one.
+            $currentUrl = (string) $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId);
+            $currentUser = (string) $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId);
+            $currentKey = (string) $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId);
+            if (in_array($statusCode, [401, 403], true)
+                && rtrim($currentUrl, '/') === rtrim($config['apiUrl'], '/')
+                && $currentUser !== '' && $currentKey !== ''
+                && [$currentUser, $currentKey] !== [$config['apiUsername'], $config['apiKey']]) {
+                $response = $this->httpClient->request('DELETE', $requestUrl, [
+                    'auth_basic' => [$currentUser, $currentKey],
+                ]);
+                $statusCode = $response->getStatusCode();
+            }
             if ($statusCode !== 404 && ($statusCode < 200 || $statusCode >= 300)) {
                 throw new \RuntimeException('Webhook deletion returned HTTP ' . $statusCode);
             }
