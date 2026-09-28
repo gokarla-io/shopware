@@ -243,7 +243,8 @@ class WebhookService
             $currentUrl = (string) $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId);
             $currentUser = (string) $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId);
             $currentKey = (string) $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId);
-            if (in_array($statusCode, [401, 403], true)
+            // Karla uses HTTP 400 for an incorrect merchant/API key.
+            if (in_array($statusCode, [400, 401, 403], true)
                 && rtrim($currentUrl, '/') === rtrim($config['apiUrl'], '/')
                 && $currentUser !== '' && $currentKey !== ''
                 && [$currentUser, $currentKey] !== [$config['apiUsername'], $config['apiKey']]) {

@@ -163,11 +163,11 @@ final class SalesChannelWebhookTest extends TestCase
 
     public static function rotatedCredentials(): array
     {
-        return [[204, true], [403, false]];
+        return [[204, true, 401], [403, false, 401], [204, true, 400]];
     }
 
     #[DataProvider('rotatedCredentials')]
-    public function testDeletionRetriesRevokedCredentialsWithoutChangingOwner(int $retryStatus, bool $success): void
+    public function testDeletionRetriesRevokedCredentialsWithoutChangingOwner(int $retryStatus, bool $success, int $initialStatus): void
     {
         $config = $this->createMock(SystemConfigService::class);
         $saved = ['shopSlug' => 'original', 'apiUsername' => 'old-user', 'apiKey' => 'revoked-key', 'apiUrl' => 'https://api.example'];
@@ -180,11 +180,11 @@ final class SalesChannelWebhookTest extends TestCase
         $config->expects($success ? self::once() : self::never())->method('set');
         $client = $this->createMock(HttpClientInterface::class);
         $attempt = 0;
-        $client->expects(self::exactly(2))->method('request')->willReturnCallback(function (string $method, string $url, array $options) use (&$attempt, $retryStatus) {
+        $client->expects(self::exactly(2))->method('request')->willReturnCallback(function (string $method, string $url, array $options) use (&$attempt, $retryStatus, $initialStatus) {
             self::assertSame('https://api.example/v1/shops/original/webhooks/subscription', $url);
             self::assertSame($attempt === 0 ? ['old-user', 'revoked-key'] : ['rotated-user', 'rotated-key'], $options['auth_basic']);
             $response = $this->createMock(ResponseInterface::class);
-            $response->method('getStatusCode')->willReturn($attempt++ === 0 ? 401 : $retryStatus);
+            $response->method('getStatusCode')->willReturn($attempt++ === 0 ? $initialStatus : $retryStatus);
 
             return $response;
         });
