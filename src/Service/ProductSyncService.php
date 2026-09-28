@@ -35,18 +35,54 @@ class ProductSyncService
     ) {
     }
 
+    /** @return list<string>|null Null preserves legacy unscoped catalog synchronization. */
+    public function getSalesChannelIds(): ?array
+    {
+        if (! $this->systemConfigService->get('KarlaDelivery.config.salesChannelMapping') && ! $this->connection->fetchOne(
+            "SELECT 1 FROM system_config WHERE sales_channel_id IS NOT NULL AND configuration_key IN
+                ('KarlaDelivery.config.shopSlug', 'KarlaDelivery.config.productSyncEnabled') LIMIT 1",
+        )) {
+            return null;
+        }
+
+        return $this->connection->fetchFirstColumn('SELECT LOWER(HEX(id)) FROM sales_channel');
+    }
+
+    public function getShopSlug(?string $salesChannelId): string
+    {
+        $slug = (string) $this->systemConfigService->get('KarlaDelivery.config.shopSlug', $salesChannelId);
+        foreach (explode(',', (string) $this->systemConfigService->get('KarlaDelivery.config.salesChannelMapping')) as $pair) {
+            $mapping = array_map('trim', explode(':', $pair));
+            if ($salesChannelId && count($mapping) === 2 && $mapping[0] === $salesChannelId && $mapping[1] !== '') {
+                $slug = $mapping[1];
+            }
+        }
+
+        return $slug;
+    }
+
+    public function scopeCriteria(Criteria $criteria, ?string $salesChannelId): void
+    {
+        if ($salesChannelId !== null) {
+            $criteria->addFilter(new EqualsFilter('visibilities.salesChannelId', $salesChannelId));
+        }
+    }
+
     /**
      * Sync a batch of products using bulk API
      * Fetches products from DB and sends them in a single bulk API request
      * Returns true if there are more products to sync
      */
-    public function syncProductBatch(int $offset, int $limit): bool
+    public function syncProductBatch(int $offset, int $limit, ?string $salesChannelId = null): bool
     {
         $context = Context::createDefaultContext();
+        $context->setConsiderInheritance($salesChannelId !== null);
+        $this->parentMap = [];
 
         $criteria = new Criteria();
         $criteria->setOffset($offset);
         $criteria->setLimit($limit);
+        $this->scopeCriteria($criteria, $salesChannelId);
 
         // Only sync active products
         $criteria->addFilter(new EqualsFilter('active', true));
@@ -164,6 +200,7 @@ class ProductSyncService
                 $variantIds = array_column($variantRows, 'id');
 
                 $variantCriteria = new Criteria($variantIds);
+                $this->scopeCriteria($variantCriteria, $salesChannelId);
                 $variantCriteria->addAssociations([
                     'cover.media',
                     'translations.language.locale',
@@ -308,7 +345,7 @@ class ProductSyncService
         $productArray = $productsToSync;
 
         try {
-            $this->bulkUpsertProducts($productArray);
+            $this->bulkUpsertProducts($productArray, $salesChannelId);
         } catch (\Throwable $t) {
             // Log error but continue
             $this->logger->error('Failed to sync product batch', [
@@ -333,12 +370,12 @@ class ProductSyncService
      * @param ProductEntity $product The product/variant to sync
      * @param ProductEntity|null $parent Optional parent product (if syncing a variant)
      */
-    public function upsertProduct(ProductEntity $product, ?ProductEntity $parent = null): void
+    public function upsertProduct(ProductEntity $product, ?ProductEntity $parent = null, ?string $salesChannelId = null): void
     {
         try {
-            $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug');
-            $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl');
-            $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode') ?? false;
+            $shopSlug = $this->getShopSlug($salesChannelId);
+            $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId);
+            $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode', $salesChannelId) ?? false;
 
             // Validate required config
             if (empty($shopSlug) || empty($apiUrl)) {
@@ -377,7 +414,7 @@ class ProductSyncService
             // Remove IDs from payload (they're in the URL)
             unset($variantPayload['product_id'], $variantPayload['variant_id']);
 
-            $this->sendRequestToKarlaApi($url, 'PUT', $variantPayload);
+            $this->sendRequestToKarlaApi($url, 'PUT', $variantPayload, $salesChannelId);
         } catch (\Throwable $t) {
             // NEVER let exceptions escape - log only to prevent blocking Shopware operations
             $this->logger->error('Failed to upsert product to Karla', [
@@ -397,11 +434,11 @@ class ProductSyncService
      *
      * @param ProductEntity[] $products
      */
-    private function bulkUpsertProducts(array $products): void
+    private function bulkUpsertProducts(array $products, ?string $salesChannelId): void
     {
-        $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug');
-        $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl');
-        $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode') ?? false;
+        $shopSlug = $this->getShopSlug($salesChannelId);
+        $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId);
+        $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode', $salesChannelId) ?? false;
 
         // Validate required config
         if (empty($shopSlug) || empty($apiUrl)) {
@@ -424,7 +461,7 @@ class ProductSyncService
 
         // Bulk POST endpoint: /shops/{slug}/products
         $url = $apiUrl . '/v1/shops/' . urlencode($shopSlug) . '/products';
-        $this->sendRequestToKarlaApi($url, 'POST', $variantPayloads);
+        $this->sendRequestToKarlaApi($url, 'POST', $variantPayloads, $salesChannelId);
     }
 
     /**
@@ -551,12 +588,12 @@ class ProductSyncService
      * This uses cascade delete - removes product and all its variants
      * Never throws - errors are logged only to prevent blocking Shopware operations
      */
-    public function deleteProduct(string $productId): void
+    public function deleteProduct(string $productId, ?string $salesChannelId = null): void
     {
         try {
-            $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug');
-            $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl');
-            $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode') ?? false;
+            $shopSlug = $this->getShopSlug($salesChannelId);
+            $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId);
+            $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode', $salesChannelId) ?? false;
 
             // Validate required config
             if (empty($shopSlug) || empty($apiUrl)) {
@@ -578,7 +615,7 @@ class ProductSyncService
                 urlencode($productId)
             );
 
-            $this->sendRequestToKarlaApi($url, 'DELETE', []);
+            $this->sendRequestToKarlaApi($url, 'DELETE', [], $salesChannelId);
         } catch (\Throwable $t) {
             // NEVER let exceptions escape - log only to prevent blocking Shopware operations
             $this->logger->error('Failed to delete product from Karla', [
@@ -596,12 +633,12 @@ class ProductSyncService
      *
      * @throws \RuntimeException if config is invalid or JSON encoding fails
      */
-    private function sendRequestToKarlaApi(string $url, string $method, array $data): void
+    private function sendRequestToKarlaApi(string $url, string $method, array $data, ?string $salesChannelId): void
     {
-        $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername');
-        $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey');
-        $requestTimeout = $this->systemConfigService->get('KarlaDelivery.config.requestTimeout') ?? 10.0;
-        $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode') ?? false;
+        $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId);
+        $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId);
+        $requestTimeout = $this->systemConfigService->get('KarlaDelivery.config.requestTimeout', $salesChannelId) ?? 10.0;
+        $debugMode = $this->systemConfigService->get('KarlaDelivery.config.debugMode', $salesChannelId) ?? false;
 
         // Validate required config
         if (empty($apiUsername) || empty($apiKey)) {

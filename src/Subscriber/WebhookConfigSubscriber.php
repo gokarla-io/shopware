@@ -44,7 +44,7 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
 
         // Handle product sync toggle
         if ($key === 'KarlaDelivery.config.productSyncEnabled') {
-            $this->handleProductSyncToggle($event->getValue());
+            $this->handleProductSyncToggle($event->getValue(), $salesChannelId);
 
             return;
         }
@@ -281,7 +281,7 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
      * @codeCoverageIgnore
      * This private method is implicitly tested through onSystemConfigChanged.
      */
-    private function handleProductSyncToggle(mixed $enabled): void
+    private function handleProductSyncToggle(mixed $enabled, ?string $salesChannelId): void
     {
         if (! $enabled) {
             $this->logger->info('Product sync disabled', [
@@ -292,7 +292,9 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
         }
 
         // Check last time product sync was enabled
-        $lastEnabled = $this->systemConfigService->get('KarlaDelivery.config.productSyncLastEnabled');
+        $lastEnabled = $salesChannelId === null
+            ? $this->systemConfigService->get('KarlaDelivery.config.productSyncLastEnabled')
+            : ($this->systemConfigService->getDomain('KarlaDelivery.config', $salesChannelId)['KarlaDelivery.config.productSyncLastEnabled'] ?? null);
         $now = time();
         $cooldownSeconds = 300; // 5 minutes cooldown
 
@@ -304,11 +306,11 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
             ]);
 
             // Update timestamp
-            $this->systemConfigService->set('KarlaDelivery.config.productSyncLastEnabled', $now);
-            $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'running');
+            $this->systemConfigService->set('KarlaDelivery.config.productSyncLastEnabled', $now, $salesChannelId);
+            $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'running', $salesChannelId);
 
             // Dispatch message to queue
-            $this->messageBus->dispatch(new SyncAllProductsMessage());
+            $this->messageBus->dispatch(new SyncAllProductsMessage(salesChannelId: $salesChannelId));
         } else {
             $secondsSinceLastSync = $now - $lastEnabled;
             $this->logger->info('Product sync enabled - skipping full sync (recently synced)', [

@@ -8,11 +8,18 @@ class SyncAllProductsMessage
 {
     private int $offset;
     private int $limit;
+    private ?string $salesChannelId = null;
 
-    public function __construct(int $offset = 0, int $limit = 50)
+    public function __construct(int $offset = 0, int $limit = 50, ?string $salesChannelId = null)
     {
         $this->offset = $offset;
         $this->limit = $limit;
+        $this->salesChannelId = $salesChannelId;
+    }
+
+    public function getSalesChannelId(): ?string
+    {
+        return $this->salesChannelId;
     }
 
     public function getOffset(): int
