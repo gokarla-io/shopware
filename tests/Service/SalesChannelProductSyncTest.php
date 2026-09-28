@@ -174,4 +174,16 @@ final class SalesChannelProductSyncTest extends TestCase
         $subscriber->onProductWritten($this->createMock(EntityWrittenEvent::class));
         $subscriber->onProductDeleted($this->createMock(EntityDeletedEvent::class));
     }
+    public function testCoordinatorCompletesWithNoEnabledChannels(): void
+    {
+        $service = $this->createMock(ProductSyncService::class);
+        $service->method('getSalesChannelIds')->willReturn(['disabled']);
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturn(false);
+        $config->expects(self::once())->method('set')->with('KarlaDelivery.config.productSyncStatus', 'completed');
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects(self::never())->method('dispatch');
+        (new SyncAllProductsMessageHandler($service, new NullLogger(), $bus, $config))(new SyncAllProductsMessage());
+    }
+
 }

@@ -226,17 +226,8 @@ class OrderSubscriber implements EventSubscriberInterface
         ) ?? '';
         $this->salesChannelMapping = $this->parseSalesChannelMapping($salesChannelMappingConfig);
 
-        // Log warnings if configuration values are missing
-        if (empty($this->shopSlug) || empty($this->apiKey) || empty($this->apiUrl)) {
-            $this->logger->warning('Missing critical configuration values', [
-                'component' => 'order.config',
-                'missing_fields' => array_filter([
-                    'shopSlug' => empty($this->shopSlug),
-                    'apiKey' => empty($this->apiKey),
-                    'apiUrl' => empty($this->apiUrl),
-                ]),
-            ]);
-        }
+        // Validate resolved credentials when syncing each order.
+
     }
 
     /**

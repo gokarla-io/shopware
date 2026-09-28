@@ -50,7 +50,7 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
         }
 
         // Only handle Karla Delivery webhook configuration changes
-        if (! str_starts_with($key, 'KarlaDelivery.config.webhook')) {
+        if ($key !== 'KarlaDelivery.config.webhookEnabled') {
             return;
         }
 
@@ -241,17 +241,8 @@ class WebhookConfigSubscriber implements EventSubscriberInterface
                     'sales_channel_id' => $salesChannelId,
                 ]);
 
-                // Even if deletion fails, clear the config to allow retry
-                // This prevents the webhook from being stuck in "enabled" state
-                $this->systemConfigService->set('KarlaDelivery.config.webhookUrl', null, $salesChannelId);
-                $this->systemConfigService->set('KarlaDelivery.config.webhookSecret', null, $salesChannelId);
-                $this->systemConfigService->set('KarlaDelivery.config.webhookId', null, $salesChannelId);
+                // Retain identity and credentials so a failed deletion can be retried.
 
-                if ($debugMode) {
-                    $this->logger->debug('Webhook config cleared despite error', [
-                        'sales_channel_id' => $salesChannelId,
-                    ]);
-                }
             }
         }
     }

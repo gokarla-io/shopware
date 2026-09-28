@@ -848,7 +848,7 @@ class OrderSubscriberTest extends TestCase
     /**
      * Test order skipped when configuration is missing
      */
-    public function testOrderSkippedWhenConfigurationMissing()
+    public function testConstructorDoesNotWarnBeforeChannelConfigurationIsResolved()
     {
         // Arrange: Setup config with missing API credentials
         $systemConfigMock = $this->createMock(SystemConfigService::class);
@@ -861,10 +861,7 @@ class OrderSubscriberTest extends TestCase
 
         $systemConfigMock->method('get')->willReturnMap($configMap);
 
-        // Assert: Expect warning log
-        $this->loggerMock->expects($this->once())
-            ->method('warning')
-            ->with($this->stringContains('Missing critical configuration'));
+        $this->loggerMock->expects($this->never())->method('warning');
 
         // Act
         new OrderSubscriber(

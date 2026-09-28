@@ -39,9 +39,13 @@ class SyncAllProductsMessageHandler
             if ($salesChannelId === null && ($channels = $this->productSyncService->getSalesChannelIds()) !== null) {
                 foreach ($channels as $channel) {
                     if ($this->systemConfigService->get('KarlaDelivery.config.productSyncEnabled', $channel)) {
+                        $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'running', $channel);
                         $this->messageBus->dispatch(new SyncAllProductsMessage(0, $message->getLimit(), $channel));
                     }
                 }
+
+                // The coordinator is complete; each channel owns its sync result.
+                $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'completed');
 
                 return;
             }

@@ -29,6 +29,8 @@ final class SalesChannelWebhookTest extends TestCase
     public static function callbacks(): array
     {
         return [
+            'prefixed deployment' => [true, 'channel-secret', self::CHANNEL, 'callback', 200, '/shop'],
+            'prefixed wrong callback' => [true, 'channel-secret', self::CHANNEL, 'wrong', 404, '/shop'],
             'own channel' => [true, 'channel-secret', self::CHANNEL, 'callback', 200],
             'wrong secret' => [true, 'global-secret', self::CHANNEL, 'callback', 401],
             'another channel order' => [true, 'channel-secret', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'callback', 403],
@@ -38,13 +40,13 @@ final class SalesChannelWebhookTest extends TestCase
     }
 
     #[DataProvider('callbacks')]
-    public function testCallbackIsolation(bool $enabled, string $secret, string $orderChannel, string $id, int $status): void
+    public function testCallbackIsolation(bool $enabled, string $secret, string $orderChannel, string $id, int $status, string $basePath = ''): void
     {
         $config = $this->createMock(SystemConfigService::class);
         $config->method('getDomain')->with('KarlaDelivery.config', self::CHANNEL, false)->willReturn([
             'KarlaDelivery.config.webhookEnabled' => $enabled,
             'KarlaDelivery.config.webhookSecret' => 'channel-secret',
-            'KarlaDelivery.config.webhookUrl' => 'https://shop.example/api/karla/webhooks/' . self::CHANNEL . '/callback',
+            'KarlaDelivery.config.webhookUrl' => 'https://shop.example' . $basePath . '/api/karla/webhooks/' . self::CHANNEL . '/callback',
         ]);
         $factory = $this->createMock(WebhookEventFactory::class);
         $factory->method('create')->willReturnCallback(static fn (array $data, Context $context) => new KarlaWebhookEvent($data, $context, $orderChannel));
@@ -118,4 +120,45 @@ final class SalesChannelWebhookTest extends TestCase
         $subscriber = new WebhookConfigSubscriber($service, $config, new NullLogger(), $this->createMock(MessageBusInterface::class), 'https://shop.example');
         $subscriber->onSystemConfigChanged(new SystemConfigChangedEvent('KarlaDelivery.config.webhookEnabled', false, self::CHANNEL));
     }
+    public static function deletionStatuses(): array
+    {
+        return [[204, true], [404, true], [401, false], [500, false]];
+    }
+
+    #[DataProvider('deletionStatuses')]
+    public function testDeletionKeepsOriginalOwnerAndChecksHttpStatus(int $status, bool $success): void
+    {
+        $config = $this->createMock(SystemConfigService::class);
+        $saved = ['shopSlug' => 'original', 'apiUsername' => 'original-user', 'apiKey' => 'original-key', 'apiUrl' => 'https://old.example'];
+        $config->method('getDomain')->willReturn(['KarlaDelivery.config.webhookRegistration' => ['id' => 'subscription', 'config' => $saved]]);
+        $config->expects($success ? self::once() : self::never())->method('set')->with('KarlaDelivery.config.webhookRegistration', null, self::CHANNEL);
+        $client = $this->createMock(HttpClientInterface::class);
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn($status);
+        $client->expects(self::once())->method('request')->with('DELETE', 'https://old.example/v1/shops/original/webhooks/subscription', ['auth_basic' => ['original-user', 'original-key']])->willReturn($response);
+        if (! $success) {
+            $this->expectException(\RuntimeException::class);
+            $this->expectExceptionMessage('HTTP ' . $status);
+        }
+        (new WebhookService($config, $client, new NullLogger()))->deleteWebhook('subscription', self::CHANNEL);
+    }
+
+    public function testLegacyChannelSubscriptionIsDeletedFromGlobalShop(): void
+    {
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturnCallback(static fn (string $key, ?string $channel = null) => match ($key) {
+            'KarlaDelivery.config.webhookUrl' => 'https://shop.example/shop/api/karla/webhooks/legacy',
+            'KarlaDelivery.config.shopSlug' => $channel === null ? 'global-shop' : 'new-brand',
+            'KarlaDelivery.config.apiUsername' => 'global-user',
+            'KarlaDelivery.config.apiKey' => 'global-key',
+            'KarlaDelivery.config.apiUrl' => 'https://api.example',
+            default => null,
+        });
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn(204);
+        $client = $this->createMock(HttpClientInterface::class);
+        $client->expects(self::once())->method('request')->with('DELETE', 'https://api.example/v1/shops/global-shop/webhooks/legacy', ['auth_basic' => ['global-user', 'global-key']])->willReturn($response);
+        (new WebhookService($config, $client, new NullLogger()))->deleteWebhook('legacy', self::CHANNEL);
+    }
+
 }

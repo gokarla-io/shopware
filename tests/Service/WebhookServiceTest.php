@@ -347,6 +347,7 @@ final class WebhookServiceTest extends TestCase
             ]);
 
         $responseMock = $this->createMock(ResponseInterface::class);
+        $responseMock->method('getStatusCode')->willReturn(204);
 
         $this->httpClientMock->expects($this->once())
             ->method('request')

@@ -68,10 +68,10 @@ class WebhookController extends AbstractController
             'KarlaDelivery.config',
             $salesChannelId,
         );
-        if ($salesChannelId !== null && parse_url(
+        if ($salesChannelId !== null && ! str_ends_with((string) parse_url(
             (string) ($channelConfig['KarlaDelivery.config.webhookUrl'] ?? ''),
             PHP_URL_PATH,
-        ) !== '/api/karla/webhooks/' . $salesChannelId . '/' . $shopwareWebhookId) {
+        ), '/api/karla/webhooks/' . $salesChannelId . '/' . $shopwareWebhookId)) {
             return new JsonResponse(['status' => 'error', 'message' => 'Unknown webhook'], Response::HTTP_NOT_FOUND);
         }
         $debugMode = (bool) $this->systemConfigService->get('KarlaDelivery.config.debugMode', $salesChannelId);

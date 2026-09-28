@@ -315,23 +315,7 @@ final class WebhookConfigSubscriberTest extends TestCase
             ->with('Failed to delete webhook on config change', $this->anything());
 
         // Expect config to be cleared even after deletion failure
-        $this->systemConfigServiceMock->expects($this->exactly(3))
-            ->method('set')
-            ->willReturnCallback(function (string $key, mixed $value): void {
-                static $callCount = 0;
-                ++$callCount;
-
-                if ($callCount === 1) {
-                    $this->assertEquals('KarlaDelivery.config.webhookUrl', $key);
-                    $this->assertNull($value);
-                } elseif ($callCount === 2) {
-                    $this->assertEquals('KarlaDelivery.config.webhookSecret', $key);
-                    $this->assertNull($value);
-                } elseif ($callCount === 3) {
-                    $this->assertEquals('KarlaDelivery.config.webhookId', $key);
-                    $this->assertNull($value);
-                }
-            });
+        $this->systemConfigServiceMock->expects($this->never())->method('set');
 
         // Act
         $this->subscriber->onSystemConfigChanged($event);
