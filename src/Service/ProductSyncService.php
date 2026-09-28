@@ -57,6 +57,7 @@ class ProductSyncService
         $criteria = new Criteria();
         $criteria->setOffset($offset);
         $criteria->setLimit($limit);
+        $criteria->setTotalCountMode(Criteria::TOTAL_COUNT_MODE_EXACT);
 
         // Only sync active products
         $criteria->addFilter(new EqualsFilter('active', true));
