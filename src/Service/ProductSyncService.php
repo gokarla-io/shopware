@@ -106,6 +106,77 @@ class ProductSyncService implements ResetInterface
         $this->storefrontUrlBases = [];
     }
 
+    public function getProductUrlLanguage(string $salesChannelId): ?string
+    {
+        return $this->resolveStorefrontUrlBase(Context::createDefaultContext(), $salesChannelId)['languageId'] ?? null;
+    }
+
+    /**
+     * Refresh indexed products in one POST, including parents needed by child-only updates.
+     * Errors propagate so the asynchronous message can be retried.
+     * @param list<string> $productIds
+     */
+    public function syncIndexedProductIds(array $productIds, ?string $salesChannelId): void
+    {
+        if ($productIds === []) {
+            return;
+        }
+        $context = Context::createDefaultContext();
+        $context->setConsiderInheritance(true);
+        $criteria = new Criteria($productIds);
+        $this->scopeCriteria($criteria, $salesChannelId);
+        $criteria->addFilter(new EqualsFilter('active', true));
+        $criteria->addAssociations(['cover.media', 'translations.language.locale']);
+        $products = [];
+        /** @var ProductEntity $product */
+        foreach ($this->productRepository->search($criteria, $context) as $product) {
+            $products[$product->getId()] = $product;
+        }
+        if ($products === []) {
+            return;
+        }
+
+        $children = new Criteria();
+        $children->addFilter(new EqualsAnyFilter('parentId', array_keys($products)));
+        $children->addFilter(new EqualsFilter('active', true));
+        $this->scopeCriteria($children, $salesChannelId);
+        $children->addAssociations(['cover.media', 'translations.language.locale']);
+        $parentsWithVariants = [];
+        /** @var ProductEntity $variant */
+        foreach ($this->productRepository->search($children, $context) as $variant) {
+            $products[$variant->getId()] = $variant;
+            $parentsWithVariants[$variant->getParentId()] = true;
+        }
+
+        $this->parentMap = [];
+        $parentIds = [];
+        $variants = [];
+        foreach ($products as $product) {
+            $parentId = $product->getParentId();
+            if ($parentId === null) {
+                $this->parentMap[$product->getId()] = $product;
+                if ($product->getChildCount() > 0 || isset($parentsWithVariants[$product->getId()])) {
+                    continue;
+                }
+            } else {
+                $parentIds[$parentId] = $parentId;
+            }
+            $variants[] = $product;
+        }
+        $missingParents = array_values(array_diff($parentIds, array_keys($this->parentMap)));
+        if ($missingParents !== []) {
+            $parentCriteria = new Criteria($missingParents);
+            $parentCriteria->addAssociations(['cover.media']);
+            /** @var ProductEntity $parent */
+            foreach ($this->productRepository->search($parentCriteria, $context) as $parent) {
+                $this->parentMap[$parent->getId()] = $parent;
+            }
+        }
+        if ($variants !== []) {
+            $this->bulkUpsertProducts($variants, $salesChannelId);
+        }
+    }
+
     /**
      * Sync a batch of products using bulk API
      * Fetches products from DB and sends them in a single bulk API request
@@ -680,6 +751,7 @@ class ProductSyncService implements ResetInterface
         $candidates = [];
         $destinationSlug = $salesChannelId !== null ? $this->getShopSlug($salesChannelId) : null;
         $destinationChannels = [];
+        $destinationApiUrl = rtrim((string) $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId), '/');
         foreach ($channels as $channel) {
             $base = $this->buildChannelUrlBase($channel);
             if ($base !== null) {
@@ -688,6 +760,7 @@ class ProductSyncService implements ResetInterface
                     $candidates[$channelId] = $base;
                 }
                 if ($salesChannelId !== null && $this->getShopSlug($channelId) === $destinationSlug
+                    && rtrim((string) $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $channelId), '/') === $destinationApiUrl
                     && ($channelId === $salesChannelId || $this->systemConfigService->get('KarlaDelivery.config.productSyncEnabled', $channelId))) {
                     $destinationChannels[] = $channelId;
                 }
@@ -994,6 +1067,9 @@ class ProductSyncService implements ResetInterface
 
         $response = $this->httpClient->request($method, $url, $requestOptions);
         $statusCode = $response->getStatusCode();
+        if ($statusCode >= 400) {
+            throw new \RuntimeException('Karla catalog API returned HTTP ' . $statusCode);
+        }
 
         if ($debugMode) {
             $content = $response->getContent(false); // false = don't throw on error status

@@ -97,6 +97,27 @@
             <tag name="kernel.event_subscriber"/>
         </service>
 
+        <service id="Karla\Delivery\Service\ProductSeoUrlPersister" decorates="Shopware\Core\Content\Seo\SeoUrlPersister">
+            <argument type="service" id="Karla\Delivery\Service\ProductSeoUrlPersister.inner"/>
+            <argument type="service" id="Karla\Delivery\Service\ProductSyncService"/>
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="messenger.default_bus"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+        </service>
+
+        <service id="Karla\Delivery\MessageHandler\SyncProductUrlsMessageHandler">
+            <argument type="service" id="Karla\Delivery\Service\ProductSyncService"/>
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <tag name="messenger.message_handler"/>
+        </service>
+
+        <service id="Karla\Delivery\Subscriber\SeoUrlSubscriber">
+            <argument type="service" id="seo_url.repository"/>
+            <argument type="service" id="messenger.default_bus"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+            <tag name="kernel.event_subscriber"/>
+        </service>
+
         <service id="Karla\Delivery\MessageHandler\SyncAllProductsMessageHandler">
             <argument type="service" id="Karla\Delivery\Service\ProductSyncService"/>
             <argument type="service" id="monolog.logger.karla_delivery"/>

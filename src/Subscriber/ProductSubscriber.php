@@ -8,13 +8,11 @@ use Karla\Delivery\Service\ProductSyncService;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Content\Product\ProductEntity;
 use Shopware\Core\Content\Product\ProductEvents;
-use Shopware\Core\Content\Seo\Event\SeoUrlUpdateEvent;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityDeletedEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
-use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
@@ -42,7 +40,6 @@ class ProductSubscriber implements EventSubscriberInterface
         return [
             ProductEvents::PRODUCT_WRITTEN_EVENT => 'onProductWritten',
             ProductEvents::PRODUCT_DELETED_EVENT => 'onProductDeleted',
-            SeoUrlUpdateEvent::class => 'onSeoUrlUpdate',
         ];
     }
 
@@ -64,40 +61,7 @@ class ProductSubscriber implements EventSubscriberInterface
     {
         if ($this->isSyncConfigured($salesChannelId)) {
             // product.written precedes SEO indexing, so preserve existing URLs.
-            $this->syncProducts($event->getIds(), $event->getContext(), $salesChannelId, false);
-        }
-    }
-
-    public function onSeoUrlUpdate(SeoUrlUpdateEvent $event): void
-    {
-        try {
-            $channels = $this->productSyncService->getSalesChannelIds() ?? [null];
-            $batches = [];
-            foreach ($event->getSeoUrls() as $row) {
-                $id = $row['foreignKey'] ?? null;
-                if (! is_string($id) || ! Uuid::isValid($id) || ! empty($row['error'])) {
-                    continue;
-                }
-                // Shopware 6.7.2 serializes these events without routeName.
-                if (($row['routeName'] ?? null) !== 'frontend.detail.page' && ($row['pathInfo'] ?? null) !== '/detail/' . $id) {
-                    continue;
-                }
-                foreach ($channels as $channel) {
-                    if ($channel !== null && isset($row['salesChannelId']) && $row['salesChannelId'] !== $channel) {
-                        continue;
-                    }
-                    $batches[$channel ?? 'legacy'][$id] = $id;
-                }
-            }
-            foreach ($batches as $channel => $ids) {
-                $salesChannelId = $channel === 'legacy' ? null : $channel;
-                if ($this->isSyncConfigured($salesChannelId)) {
-                    $this->syncProducts(array_values($ids), Context::createDefaultContext(), $salesChannelId, true);
-                }
-            }
-        } catch (\Throwable $error) {
-            // Catalog API failures must not interrupt Shopware's SEO indexing.
-            $this->logger->error('Unable to synchronize indexed product URLs', ['error' => $error->getMessage()]);
+            $this->syncProducts($event->getIds(), $event->getContext(), $salesChannelId);
         }
     }
 
@@ -127,11 +91,11 @@ class ProductSubscriber implements EventSubscriberInterface
     }
 
     /** @param list<string> $productIds */
-    private function syncProducts(array $productIds, Context $context, ?string $salesChannelId, bool $resolveUrls): void
+    private function syncProducts(array $productIds, Context $context, ?string $salesChannelId): void
     {
         try {
             $context = clone $context;
-            $context->setConsiderInheritance($salesChannelId !== null);
+            $context->setConsiderInheritance(true);
 
             $criteria = new Criteria($productIds);
             $this->productSyncService->scopeCriteria($criteria, $salesChannelId);
@@ -193,7 +157,7 @@ class ProductSubscriber implements EventSubscriberInterface
                     // with a single batched SEO query instead of one per variant
                     /** @var array<ProductEntity> $variantList */
                     $variantList = iterator_to_array($variants, false);
-                    $this->productSyncService->upsertProducts($variantList, $product, $salesChannelId, $resolveUrls);
+                    $this->productSyncService->upsertProducts($variantList, $product, $salesChannelId, false);
 
                     foreach ($variantList as $variant) {
                         $this->logger->info('Variant synced to Karla', [
@@ -211,7 +175,7 @@ class ProductSubscriber implements EventSubscriberInterface
             if (count($standaloneProducts) > 0) {
                 // One call for the whole event: product URLs resolve with a
                 // single batched SEO query instead of one per product
-                $this->productSyncService->upsertProducts($standaloneProducts, null, $salesChannelId, $resolveUrls);
+                $this->productSyncService->upsertProducts($standaloneProducts, null, $salesChannelId, false);
 
                 foreach ($standaloneProducts as $product) {
                     $this->logger->info('Product synced to Karla', [

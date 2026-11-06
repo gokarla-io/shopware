@@ -1,0 +1,182 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Karla\Delivery\Tests\Service;
+
+use Karla\Delivery\Message\SyncProductUrlsMessage;
+use Karla\Delivery\MessageHandler\SyncProductUrlsMessageHandler;
+use Karla\Delivery\Service\ProductSeoUrlPersister;
+use Karla\Delivery\Service\ProductSyncService;
+use Karla\Delivery\Subscriber\SeoUrlSubscriber;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
+use Shopware\Core\Content\Seo\SeoUrl\SeoUrlEntity;
+use Shopware\Core\Content\Seo\SeoUrlPersister;
+use Shopware\Core\Framework\Context;
+use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
+use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
+use Shopware\Core\Framework\MessageQueue\AsyncMessageInterface;
+use Shopware\Core\System\SalesChannel\SalesChannelEntity;
+use Shopware\Core\System\SystemConfig\SystemConfigService;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\MessageBusInterface;
+
+final class ProductUrlQueueTest extends TestCase
+{
+    public static function persistenceCases(): array
+    {
+        return [
+            'selected language including URL removal' => ['frontend.detail.page', ['product'], true, true, true],
+            'other route' => ['frontend.navigation.page', ['category'], true, true, false],
+            'empty batch' => ['frontend.detail.page', [], true, true, false],
+            'disabled sync' => ['frontend.detail.page', ['product'], false, true, false],
+            'other language' => ['frontend.detail.page', ['product'], true, false, false],
+        ];
+    }
+
+    #[DataProvider('persistenceCases')]
+    public function testPersistenceQueuesOriginalIdsOnlyAfterCommitAndInSelectedLanguage(string $route, array $ids, bool $enabled, bool $selected, bool $queued): void
+    {
+        $context = Context::createDefaultContext();
+        $channel = new SalesChannelEntity();
+        $channel->setId('channel');
+        $inner = $this->createMock(SeoUrlPersister::class);
+        $persisted = false;
+        $inner->expects(self::once())->method('updateSeoUrls')->with($context, $route, $ids, [], $channel)->willReturnCallback(static function () use (&$persisted) {
+            $persisted = true;
+        });
+        $products = $this->createMock(ProductSyncService::class);
+        $products->method('getProductUrlLanguage')->willReturn($selected ? $context->getLanguageId() : 'other-language');
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturn($enabled);
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects($queued ? self::once() : self::never())->method('dispatch')->willReturnCallback(static function ($message) use (&$persisted, $ids) {
+            self::assertTrue($persisted);
+            self::assertInstanceOf(AsyncMessageInterface::class, $message);
+            self::assertInstanceOf(SyncProductUrlsMessage::class, $message);
+            self::assertSame($ids, $message->productIds);
+            self::assertSame('channel', $message->salesChannelId);
+
+            return new Envelope($message);
+        });
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::never())->method('error');
+        $decorator = new ProductSeoUrlPersister($inner, $products, $config, $bus, $logger);
+        $decorator->updateSeoUrls($context, $route, $ids, [], $channel);
+    }
+
+    public function testQueueFailureDoesNotBreakSeoPersistence(): void
+    {
+        $context = Context::createDefaultContext();
+        $channel = new SalesChannelEntity();
+        $channel->setId('channel');
+        $inner = $this->createMock(SeoUrlPersister::class);
+        $inner->expects(self::once())->method('updateSeoUrls');
+        $products = $this->createMock(ProductSyncService::class);
+        $products->method('getProductUrlLanguage')->willReturn($context->getLanguageId());
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturn(true);
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->method('dispatch')->willThrowException(new \RuntimeException('Queue unavailable'));
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error')->with('Unable to queue indexed product URLs', ['error' => 'Queue unavailable']);
+        (new ProductSeoUrlPersister($inner, $products, $config, $bus, $logger))->updateSeoUrls($context, 'frontend.detail.page', ['product'], [], $channel);
+    }
+
+    public function testCorePersistenceErrorsStillPropagate(): void
+    {
+        $channel = new SalesChannelEntity();
+        $inner = $this->createMock(SeoUrlPersister::class);
+        $inner->method('updateSeoUrls')->willThrowException(new \RuntimeException('Core failure'));
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects(self::never())->method('dispatch');
+        $decorator = new ProductSeoUrlPersister($inner, $this->createMock(ProductSyncService::class), $this->createMock(SystemConfigService::class), $bus, $this->createMock(LoggerInterface::class));
+        $this->expectExceptionMessage('Core failure');
+        $decorator->updateSeoUrls(Context::createDefaultContext(), 'frontend.detail.page', ['product'], [], $channel);
+    }
+
+    public static function handlerCases(): array
+    {
+        return [
+            'legacy' => [null, 'a', true, [null]],
+            'scoped' => [['a', 'b'], 'a', true, ['a']],
+            'global manual edit' => [['a', 'b'], null, true, ['a', 'b']],
+            'disabled' => [['a'], 'a', false, []],
+        ];
+    }
+
+    #[DataProvider('handlerCases')]
+    public function testQueuedRefreshUsesOnlyEnabledMatchingCatalogs(?array $channels, ?string $messageChannel, bool $enabled, array $expected): void
+    {
+        $products = $this->createMock(ProductSyncService::class);
+        $products->method('getSalesChannelIds')->willReturn($channels);
+        $seen = [];
+        $products->expects(self::exactly(count($expected)))->method('syncIndexedProductIds')->willReturnCallback(static function ($ids, $channel) use (&$seen) {
+            self::assertSame(['product'], $ids);
+            $seen[] = $channel;
+        });
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturn($enabled);
+        (new SyncProductUrlsMessageHandler($products, $config))(new SyncProductUrlsMessage(['product'], $messageChannel));
+        self::assertSame($expected, $seen);
+    }
+
+    public function testManualSeoWritesAreGroupedByChannelAndDeduplicated(): void
+    {
+        $repository = $this->createMock(EntityRepository::class);
+        $rows = [];
+        foreach ([['a', 'product'], ['a', 'product'], [null, 'shared']] as [$channel, $product]) {
+            $row = $this->createMock(SeoUrlEntity::class);
+            $row->method('getSalesChannelId')->willReturn($channel);
+            $row->method('getForeignKey')->willReturn($product);
+            $rows[] = $row;
+        }
+        $result = $this->createMock(EntitySearchResult::class);
+        $result->method('getIterator')->willReturn(new \ArrayIterator($rows));
+        $repository->expects(self::once())->method('search')->willReturnCallback(static function ($criteria) use ($result) {
+            self::assertSame(['seo-id'], $criteria->getIds());
+            self::assertSame('routeName', $criteria->getFilters()[0]->getField());
+            self::assertSame('frontend.detail.page', $criteria->getFilters()[0]->getValue());
+
+            return $result;
+        });
+        $bus = $this->createMock(MessageBusInterface::class);
+        $messages = [];
+        $bus->expects(self::exactly(2))->method('dispatch')->willReturnCallback(static function ($message) use (&$messages) {
+            $messages[] = [$message->salesChannelId, $message->productIds];
+
+            return new Envelope($message);
+        });
+        $subscriber = new SeoUrlSubscriber($repository, $bus, $this->createMock(LoggerInterface::class));
+        self::assertSame(['seo_url.written' => 'onSeoUrlWritten'], SeoUrlSubscriber::getSubscribedEvents());
+        $event = $this->createMock(EntityWrittenEvent::class);
+        $event->method('getIds')->willReturn(['seo-id']);
+        $event->method('getContext')->willReturn(Context::createDefaultContext());
+        $subscriber->onSeoUrlWritten($event);
+        self::assertSame([['a', ['product']], [null, ['shared']]], $messages);
+    }
+
+    public function testEmptyManualWriteDoesNotSelectAllSeoRows(): void
+    {
+        $repository = $this->createMock(EntityRepository::class);
+        $repository->expects(self::never())->method('search');
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->expects(self::never())->method('dispatch');
+        (new SeoUrlSubscriber($repository, $bus, $this->createMock(LoggerInterface::class)))->onSeoUrlWritten($this->createMock(EntityWrittenEvent::class));
+    }
+
+    public function testManualSeoQueueErrorsDoNotBreakTheWrite(): void
+    {
+        $repository = $this->createMock(EntityRepository::class);
+        $repository->method('search')->willThrowException(new \RuntimeException('Read failure'));
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error')->with('Unable to queue edited product SEO URLs', ['error' => 'Read failure']);
+        $event = $this->createMock(EntityWrittenEvent::class);
+        $event->method('getIds')->willReturn(['seo-id']);
+        $event->method('getContext')->willReturn(Context::createDefaultContext());
+        (new SeoUrlSubscriber($repository, $this->createMock(MessageBusInterface::class), $logger))->onSeoUrlWritten($event);
+    }
+}

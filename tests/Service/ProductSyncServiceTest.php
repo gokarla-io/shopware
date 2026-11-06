@@ -227,13 +227,13 @@ class ProductSyncServiceTest extends TestCase
      * Stub config + HTTP so upserts succeed, collecting every JSON body sent
      * to Karla (for tests that drive several upserts).
      *
-     * @return \ArrayObject<int, array<string, mixed>>
+     * @return \ArrayObject<int, array<array-key, mixed>>
      */
-    private function captureUpsertBodies(array $channelIds = [null], bool $sharedDestination = false, bool $syncEnabled = true): \ArrayObject
+    private function captureUpsertBodies(array $channelIds = [null], bool $sharedDestination = false, bool $syncEnabled = true, array $apiUrls = [], int $responseStatus = 200): \ArrayObject
     {
         $config = [];
         foreach ($channelIds as $channelId) {
-            foreach (['shopSlug' => $channelId === null || $sharedDestination ? 'test-shop' : 'test-shop-' . $channelId, 'productSyncEnabled' => $syncEnabled, 'apiUrl' => 'https://api.test.com', 'debugMode' => false, 'apiUsername' => 'user', 'apiKey' => 'key', 'requestTimeout' => 10.0] as $key => $value) {
+            foreach (['shopSlug' => $channelId === null || $sharedDestination ? 'test-shop' : 'test-shop-' . $channelId, 'productSyncEnabled' => $syncEnabled, 'apiUrl' => $apiUrls[$channelId] ?? 'https://api.test.com', 'debugMode' => false, 'apiUsername' => 'user', 'apiKey' => 'key', 'requestTimeout' => 10.0] as $key => $value) {
                 $config[] = ['KarlaDelivery.config.' . $key, $channelId, $value];
             }
         }
@@ -241,7 +241,7 @@ class ProductSyncServiceTest extends TestCase
 
         $bodies = new \ArrayObject();
         $response = $this->createMock(ResponseInterface::class);
-        $response->method('getStatusCode')->willReturn(200);
+        $response->method('getStatusCode')->willReturn($responseStatus);
         $response->method('getContent')->willReturn('{}');
         $this->httpClientMock->method('request')->willReturnCallback(
             function (string $method, string $url, array $options) use ($bodies, $response): ResponseInterface {
@@ -448,6 +448,144 @@ class ProductSyncServiceTest extends TestCase
         $this->stubSeoUrls(['product-id-123' => 'product']);
         $body = $this->captureUpsertBody($this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product'));
         self::assertSame('https://a.example.com/product', $body['product_url']);
+    }
+
+    public function testSameSlugOnDifferentApiDestinationsIsNotAmbiguous(): void
+    {
+        $this->stubChannels([
+            ['id' => 'sc-1', 'languageId' => 'lang-1', 'domains' => [['languageId' => 'lang-1', 'url' => 'https://a.example.com']]],
+            ['id' => 'sc-2', 'languageId' => 'lang-1', 'domains' => [['languageId' => 'lang-1', 'url' => 'https://b.example.com']]],
+        ]);
+        $this->stubSeoUrls(['product-id-123' => 'product']);
+        $bodies = $this->captureUpsertBodies(['sc-1', 'sc-2'], true, true, ['sc-2' => 'https://staging.api.test.com']);
+        $this->service->upsertProduct($this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product'), null, 'sc-1');
+        self::assertSame('https://a.example.com/product', $bodies[0]['product_url']);
+    }
+
+    public function testSelectedProductUrlLanguageIsAvailableToSeoPersistence(): void
+    {
+        $this->stubStorefront('https://shop.example.com', 'selected-language');
+        self::assertSame('selected-language', $this->service->getProductUrlLanguage('sc-1'));
+    }
+
+    public function testIndexedEmptyIdsDoNotSelectTheEntireCatalog(): void
+    {
+        $this->productRepositoryMock->expects(self::never())->method('search');
+        $this->service->syncIndexedProductIds([], null);
+    }
+
+    public function testIndexedMissingProductsDoNotSendRequests(): void
+    {
+        $result = $this->createMock(EntitySearchResult::class);
+        $result->method('getIterator')->willReturn(new \ArrayIterator([]));
+        $this->productRepositoryMock->expects(self::once())->method('search')->willReturn($result);
+        $this->httpClientMock->expects(self::never())->method('request');
+        $this->service->syncIndexedProductIds(['missing-id'], null);
+    }
+
+    public static function indexedVariantUrls(): array
+    {
+        return ['own URL' => ['child-url', 'https://shop.example.com/child-url'], 'confirmed removal' => [null, null]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('indexedVariantUrls')]
+    public function testIndexedChildOnlyUpdatesLoadParentAndUseOneBulkPost(?string $path, ?string $expectedUrl): void
+    {
+        $parent = $this->makeStandaloneProduct('parent-id', 'PARENT', 'Parent title');
+        $child = $this->createMock(ProductEntity::class);
+        $child->method('getId')->willReturn('child-id');
+        $child->method('getParentId')->willReturn('parent-id');
+        $child->method('getProductNumber')->willReturn('CHILD');
+        $child->method('getName')->willReturn(null);
+        $child->method('getPrice')->willReturn(null);
+        $child->method('getCover')->willReturn(null);
+        $child->method('getTranslations')->willReturn(null);
+        $results = [];
+        foreach ([[$child], [], [$parent]] as $entities) {
+            $result = $this->createMock(EntitySearchResult::class);
+            $result->method('getIterator')->willReturn(new \ArrayIterator($entities));
+            $results[] = $result;
+        }
+        $this->productRepositoryMock->expects(self::exactly(3))->method('search')->willReturnCallback(static function ($criteria, $context) use (&$results) {
+            self::assertTrue($context->considerInheritance());
+
+            return array_shift($results);
+        });
+        $this->stubStorefront('https://shop.example.com');
+        $this->stubSeoUrls($path === null ? [] : ['child-id' => $path]);
+        $bodies = $this->captureUpsertBodies();
+        $this->service->syncIndexedProductIds(['child-id'], null);
+        self::assertCount(1, $bodies);
+        self::assertCount(1, $bodies[0]);
+        self::assertSame('Parent title', $bodies[0][0]['title']);
+        self::assertSame('parent-id', $bodies[0][0]['product_id']);
+        self::assertSame('child-id', $bodies[0][0]['variant_id']);
+        self::assertSame($expectedUrl, $bodies[0][0]['product_url']);
+    }
+
+    public function testIndexedParentExpandsVariantsWithoutAnotherParentRead(): void
+    {
+        $parent = $this->makeStandaloneProduct('parent-id', 'PARENT', 'Parent title');
+        $child = $this->createMock(ProductEntity::class);
+        $child->method('getId')->willReturn('child-id');
+        $child->method('getParentId')->willReturn('parent-id');
+        $child->method('getProductNumber')->willReturn('CHILD');
+        $child->method('getPrice')->willReturn(null);
+        $child->method('getCover')->willReturn(null);
+        $child->method('getTranslations')->willReturn(null);
+        $results = [];
+        foreach ([[$parent], [$child]] as $entities) {
+            $result = $this->createMock(EntitySearchResult::class);
+            $result->method('getIterator')->willReturn(new \ArrayIterator($entities));
+            $results[] = $result;
+        }
+        $this->productRepositoryMock->expects(self::exactly(2))->method('search')->willReturnCallback(static function () use (&$results) {
+            return array_shift($results);
+        });
+        $this->stubStorefront('https://shop.example.com');
+        $this->stubSeoUrls(['parent-id' => 'parent']);
+        $bodies = $this->captureUpsertBodies(['sc-1']);
+        $this->service->syncIndexedProductIds(['parent-id'], 'sc-1');
+        self::assertSame('child-id', $bodies[0][0]['variant_id']);
+        self::assertSame('Parent title', $bodies[0][0]['title']);
+    }
+
+    public function testIndexedApiRejectionPropagatesForQueueRetry(): void
+    {
+        $product = $this->makeStandaloneProduct('product-id', 'SKU', 'Title');
+        $results = [];
+        foreach ([[$product], []] as $entities) {
+            $result = $this->createMock(EntitySearchResult::class);
+            $result->method('getIterator')->willReturn(new \ArrayIterator($entities));
+            $results[] = $result;
+        }
+        $this->productRepositoryMock->method('search')->willReturnCallback(static function () use (&$results) {
+            return array_shift($results);
+        });
+        $this->stubStorefront('https://shop.example.com');
+        $this->stubSeoUrls(['product-id' => 'product']);
+        $this->captureUpsertBodies([null], false, true, [], 500);
+        $this->expectExceptionMessage('Karla catalog API returned HTTP 500');
+        $this->service->syncIndexedProductIds(['product-id'], null);
+    }
+
+    public function testIndexedParentWithoutEligibleVariantsIsNotPromoted(): void
+    {
+        $parent = $this->createMock(ProductEntity::class);
+        $parent->method('getId')->willReturn('parent-id');
+        $parent->method('getParentId')->willReturn(null);
+        $parent->method('getChildCount')->willReturn(1);
+        $results = [];
+        foreach ([[$parent], []] as $entities) {
+            $result = $this->createMock(EntitySearchResult::class);
+            $result->method('getIterator')->willReturn(new \ArrayIterator($entities));
+            $results[] = $result;
+        }
+        $this->productRepositoryMock->expects(self::exactly(2))->method('search')->willReturnCallback(static function () use (&$results) {
+            return array_shift($results);
+        });
+        $this->httpClientMock->expects(self::never())->method('request');
+        $this->service->syncIndexedProductIds(['parent-id'], null);
     }
 
     public function testStorefrontResolutionIsCachedAcrossUpserts(): void

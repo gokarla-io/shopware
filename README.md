@@ -93,6 +93,21 @@ After installation, configure the extension:
 - Order Statuses: Enable "In Progress" and "Completed"
 - Delivery Statuses: Enable "Shipped" and "Shipped Partially"
 
+### Product URL synchronization
+
+Run a full product sync after installing the update to populate existing catalog
+URLs. Realtime URL changes are queued after Shopware persists SEO paths, including
+URL removals and manual SEO edits. Keep a Shopware worker consuming the `async`
+transport and restart workers after updating the plugin; pending jobs delay URL updates. Failed API requests are retried by
+Shopware's queue.
+
+URLs use the storefront's default-language domain when available, prefer HTTPS,
+and fall back from a variant's URL to its parent's. Keep the configured domains
+customer-facing. With multiple storefronts, configure one Karla destination per
+storefront or enable product sync for only one storefront per destination. If
+several enabled storefronts share the same API address and shop slug, the plugin
+omits URLs rather than choosing a domain for that shared catalog.
+
 ## Support
 
 - **Documentation**: [docs.gokarla.io](https://docs.gokarla.io/docs/shop-integrations/shopware)
