@@ -33,7 +33,7 @@ final class SalesChannelProductSyncTest extends TestCase
         $connection = $this->createMock(Connection::class);
         $connection->method('fetchOne')->willReturnOnConsecutiveCalls(false, 1);
         $connection->method('fetchFirstColumn')->willReturn(['first', 'second']);
-        $service = new ProductSyncService($this->createMock(EntityRepository::class), $this->createMock(HttpClientInterface::class), $this->createMock(SystemConfigService::class), new NullLogger(), $connection);
+        $service = new ProductSyncService($this->createMock(EntityRepository::class), $this->createMock(HttpClientInterface::class), $this->createMock(SystemConfigService::class), new NullLogger(), $connection, $this->createMock(EntityRepository::class), $this->createMock(EntityRepository::class));
         self::assertNull($service->getSalesChannelIds());
         self::assertSame(['first', 'second'], $service->getSalesChannelIds());
     }
@@ -82,7 +82,7 @@ final class SalesChannelProductSyncTest extends TestCase
 
             return $response;
         });
-        $service = new ProductSyncService($repository, $client, $config, new NullLogger(), $this->createMock(Connection::class));
+        $service = new ProductSyncService($repository, $client, $config, new NullLogger(), $this->createMock(Connection::class), $this->createMock(EntityRepository::class), $this->createMock(EntityRepository::class));
         foreach (['first', 'second'] as $channel) {
             self::assertFalse($service->syncProductBatch(0, 50, $channel));
             $service->deleteProduct($channel . '-product', $channel);
@@ -150,7 +150,7 @@ final class SalesChannelProductSyncTest extends TestCase
         $service = $this->createMock(ProductSyncService::class);
         $service->method('getSalesChannelIds')->willReturn(['second']);
         $service->expects(self::once())->method('scopeCriteria')->with(self::isInstanceOf(Criteria::class), 'second');
-        $service->expects(self::once())->method('upsertProduct')->with($product, null, 'second');
+        $service->expects(self::once())->method('upsertProducts')->with([$product], null, 'second');
         $service->expects(self::once())->method('deleteProduct')->with('product', 'second');
         $subscriber = new ProductSubscriber($config, new NullLogger(), $repository, $service);
         $context = Context::createDefaultContext();
