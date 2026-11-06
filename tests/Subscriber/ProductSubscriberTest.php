@@ -11,6 +11,7 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Content\Product\ProductEntity;
 use Shopware\Core\Content\Product\ProductEvents;
+use Shopware\Core\Content\Seo\Event\SeoUrlUpdateEvent;
 use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityDeletedEvent;
@@ -70,12 +71,84 @@ final class ProductSubscriberTest extends TestCase
 
         $this->assertArrayHasKey(ProductEvents::PRODUCT_WRITTEN_EVENT, $events);
         $this->assertEquals('onProductWritten', $events[ProductEvents::PRODUCT_WRITTEN_EVENT]);
+        self::assertSame('onSeoUrlUpdate', $events[SeoUrlUpdateEvent::class]);
         $this->assertArrayHasKey(ProductEvents::PRODUCT_DELETED_EVENT, $events);
         $this->assertEquals('onProductDeleted', $events[ProductEvents::PRODUCT_DELETED_EVENT]);
     }
 
+    public static function seoEventRouting(): array
+    {
+        return [
+            'legacy' => [null, 'sc-a', [null]],
+            'scoped' => [['sc-a', 'sc-b'], 'sc-a', ['sc-a']],
+            'global SEO row' => [['sc-a', 'sc-b'], null, ['sc-a', 'sc-b']],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('seoEventRouting')]
+    public function testSeoPersistenceRefreshesOnlyAffectedCatalogs(?array $configuredChannels, ?string $rowChannel, array $expectedChannels): void
+    {
+        $id = Uuid::randomHex();
+        $product = new ProductEntity();
+        $product->setId($id);
+        $product->setActive(true);
+        $product->setParentId(null);
+        $product->setChildCount(0);
+        $product->setProductNumber('SEO-PRODUCT');
+        $product->setName('SEO Product');
+        $this->productSyncServiceMock->method('getSalesChannelIds')->willReturn($configuredChannels);
+        $this->systemConfigServiceMock->method('get')->willReturnCallback(static fn (string $key) => match ($key) {
+            'KarlaDelivery.config.productSyncEnabled' => true,
+            'KarlaDelivery.config.shopSlug' => 'test-shop',
+            'KarlaDelivery.config.apiUsername' => 'user',
+            'KarlaDelivery.config.apiKey' => 'key',
+            'KarlaDelivery.config.apiUrl' => 'https://api.example.com',
+            default => null,
+        });
+        $result = $this->createMock(EntitySearchResult::class);
+        $result->method('getIterator')->willReturn(new \ArrayIterator([$product]));
+        $this->productRepositoryMock->expects(self::exactly(count($expectedChannels)))->method('search')->willReturnCallback(static function ($criteria) use ($id, $result) {
+            self::assertSame([$id], $criteria->getIds());
+
+            return $result;
+        });
+        $seen = [];
+        $this->productSyncServiceMock->expects(self::exactly(count($expectedChannels)))->method('upsertProducts')->willReturnCallback(static function ($products, $parent, $channel, $resolveUrls) use (&$seen, $product) {
+            self::assertSame([$product], $products);
+            self::assertNull($parent);
+            self::assertTrue($resolveUrls);
+            $seen[] = $channel;
+        });
+        $row = ['foreignKey' => $id, 'pathInfo' => '/detail/' . $id, 'salesChannelId' => $rowChannel];
+        $this->subscriber->onSeoUrlUpdate(new SeoUrlUpdateEvent([
+            [], ['foreignKey' => 'invalid'],
+            [...$row, 'error' => 'generation failed'],
+            [...$row, 'pathInfo' => '/navigation/' . $id],
+            [...$row, 'salesChannelId' => 'other-channel'],
+            $row, $row,
+            [...$row, 'routeName' => 'frontend.detail.page', 'pathInfo' => '/custom/detail'],
+        ]));
+        self::assertSame($expectedChannels, $seen);
+    }
+
+    public function testSeoPersistenceSkipsDisabledSync(): void
+    {
+        $id = Uuid::randomHex();
+        $this->productRepositoryMock->expects(self::never())->method('search');
+        $this->subscriber->onSeoUrlUpdate(new SeoUrlUpdateEvent([['foreignKey' => $id, 'pathInfo' => '/detail/' . $id]]));
+    }
+
+    public function testSeoPersistenceFailuresDoNotInterruptIndexing(): void
+    {
+        $this->productSyncServiceMock->method('getSalesChannelIds')->willThrowException(new \RuntimeException('Unavailable'));
+        $this->loggerMock->expects(self::once())->method('error')->with('Unable to synchronize indexed product URLs', ['error' => 'Unavailable']);
+        $this->subscriber->onSeoUrlUpdate(new SeoUrlUpdateEvent([]));
+    }
+
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenWhenDisabled(): void
@@ -92,6 +165,8 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenSkipsWhenConfigMissing(): void
@@ -120,6 +195,8 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenSyncsActiveProduct(): void
@@ -170,6 +247,8 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenSkipsInactiveProduct(): void
@@ -206,6 +285,8 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenHandlesException(): void
@@ -360,6 +441,8 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
     #[\PHPUnit\Framework\Attributes\DataProvider('parentChildCounts')]

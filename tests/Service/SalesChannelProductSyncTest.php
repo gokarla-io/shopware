@@ -150,7 +150,7 @@ final class SalesChannelProductSyncTest extends TestCase
         $service = $this->createMock(ProductSyncService::class);
         $service->method('getSalesChannelIds')->willReturn(['second']);
         $service->expects(self::once())->method('scopeCriteria')->with(self::isInstanceOf(Criteria::class), 'second');
-        $service->expects(self::once())->method('upsertProducts')->with([$product], null, 'second');
+        $service->expects(self::once())->method('upsertProducts')->with([$product], null, 'second', false);
         $service->expects(self::once())->method('deleteProduct')->with('product', 'second');
         $subscriber = new ProductSubscriber($config, new NullLogger(), $repository, $service);
         $context = Context::createDefaultContext();

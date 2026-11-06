@@ -430,8 +430,9 @@ class ProductSyncService implements ResetInterface
      *
      * @param array<ProductEntity> $products
      * @param ProductEntity|null $parent Optional shared parent (when syncing variants)
+     * @param bool $resolveUrls False before SEO indexing, to preserve stored URLs
      */
-    public function upsertProducts(array $products, ?ProductEntity $parent = null, ?string $salesChannelId = null): void
+    public function upsertProducts(array $products, ?ProductEntity $parent = null, ?string $salesChannelId = null, bool $resolveUrls = true): void
     {
         if (count($products) === 0) {
             return;
@@ -446,7 +447,7 @@ class ProductSyncService implements ResetInterface
             if ($parent !== null) {
                 $idsForUrls[] = $parent->getId();
             }
-            $urlMap = $this->resolveProductUrls($idsForUrls, $salesChannelId);
+            $urlMap = $resolveUrls ? $this->resolveProductUrls($idsForUrls, $salesChannelId) : null;
         } catch (\Throwable) {
             // Entity getters can throw on partially hydrated entities; keep the
             // never-throws contract and degrade to "resolution unavailable"
@@ -666,9 +667,6 @@ class ProductSyncService implements ResetInterface
         // and comparison-feed channels with a configured domain must never win
         // the pick: their SEO lookup would silently null every product_url.
         $criteria->addFilter(new EqualsFilter('typeId', Defaults::SALES_CHANNEL_TYPE_STOREFRONT));
-        if ($salesChannelId !== null) {
-            $criteria->addFilter(new EqualsFilter('id', $salesChannelId));
-        }
         $criteria->addAssociation('domains');
 
         /** @var array<SalesChannelEntity> $channels */
@@ -680,14 +678,30 @@ class ProductSyncService implements ResetInterface
         // A storefront is an active channel with a usable domain. Key by channel
         // ID so ambiguous legacy configurations can be detected.
         $candidates = [];
+        $destinationSlug = $salesChannelId !== null ? $this->getShopSlug($salesChannelId) : null;
+        $destinationChannels = [];
         foreach ($channels as $channel) {
-            if ($salesChannelId !== null && $channel->getId() !== $salesChannelId) {
-                continue;
-            }
             $base = $this->buildChannelUrlBase($channel);
             if ($base !== null) {
-                $candidates[$channel->getId()] = $base;
+                $channelId = $channel->getId();
+                if ($salesChannelId === null || $channelId === $salesChannelId) {
+                    $candidates[$channelId] = $base;
+                }
+                if ($salesChannelId !== null && $this->getShopSlug($channelId) === $destinationSlug
+                    && ($channelId === $salesChannelId || $this->systemConfigService->get('KarlaDelivery.config.productSyncEnabled', $channelId))) {
+                    $destinationChannels[] = $channelId;
+                }
             }
+        }
+
+        if (count($destinationChannels) > 1) {
+            $this->logger->warning('Multiple storefronts sync to the same Karla shop; product_url will be omitted', [
+                'component' => 'product.sync',
+                'shop_slug' => $destinationSlug,
+                'sales_channel_ids' => $destinationChannels,
+            ]);
+
+            return $this->storefrontUrlBases[$cacheKey] = null;
         }
 
         if (count($candidates) === 0) {
@@ -726,31 +740,26 @@ class ProductSyncService implements ResetInterface
             return null;
         }
 
-        $chosen = $domains->first();
+        $chosen = null;
+        $chosenRank = null;
         foreach ($domains as $domain) {
-            if ($domain->getLanguageId() === $channel->getLanguageId()) {
-                $chosen = $domain;
-
-                break;
+            $baseUrl = rtrim((string) $domain->getUrl(), '/');
+            if ($baseUrl === '') {
+                continue;
+            }
+            // Default language first, HTTPS next, then a stable URL ordering.
+            $rank = [$domain->getLanguageId() !== $channel->getLanguageId(), ! str_starts_with(strtolower($baseUrl), 'https://'), $baseUrl, $domain->getLanguageId()];
+            if ($chosenRank === null || $rank < $chosenRank) {
+                $chosenRank = $rank;
+                $chosen = [
+                    'baseUrl' => $baseUrl,
+                    'salesChannelId' => $channel->getId(),
+                    'languageId' => $domain->getLanguageId(),
+                ];
             }
         }
 
-        if ($chosen === null) {
-            return null;
-        }
-
-        // A domain without a usable URL cannot produce absolute product URLs;
-        // treat it like no domain at all rather than emitting relative URLs.
-        $baseUrl = rtrim((string) $chosen->getUrl(), '/');
-        if ($baseUrl === '') {
-            return null;
-        }
-
-        return [
-            'baseUrl' => $baseUrl,
-            'salesChannelId' => $channel->getId(),
-            'languageId' => $chosen->getLanguageId(),
-        ];
+        return $chosen;
     }
 
     /**

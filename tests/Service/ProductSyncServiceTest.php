@@ -229,11 +229,11 @@ class ProductSyncServiceTest extends TestCase
      *
      * @return \ArrayObject<int, array<string, mixed>>
      */
-    private function captureUpsertBodies(array $channelIds = [null]): \ArrayObject
+    private function captureUpsertBodies(array $channelIds = [null], bool $sharedDestination = false, bool $syncEnabled = true): \ArrayObject
     {
         $config = [];
         foreach ($channelIds as $channelId) {
-            foreach (['shopSlug' => 'test-shop', 'apiUrl' => 'https://api.test.com', 'debugMode' => false, 'apiUsername' => 'user', 'apiKey' => 'key', 'requestTimeout' => 10.0] as $key => $value) {
+            foreach (['shopSlug' => $channelId === null || $sharedDestination ? 'test-shop' : 'test-shop-' . $channelId, 'productSyncEnabled' => $syncEnabled, 'apiUrl' => 'https://api.test.com', 'debugMode' => false, 'apiUsername' => 'user', 'apiKey' => 'key', 'requestTimeout' => 10.0] as $key => $value) {
                 $config[] = ['KarlaDelivery.config.' . $key, $channelId, $value];
             }
         }
@@ -388,6 +388,66 @@ class ProductSyncServiceTest extends TestCase
         self::assertSame('https://b.example.com/b-product', $bodies[0]['product_url']);
         self::assertSame('https://a.example.com/a-product', $bodies[1]['product_url']);
         self::assertSame('https://b.example.com/b-product', $bodies[2]['product_url']);
+    }
+
+    public function testSharedDestinationOmitsAmbiguousStorefrontUrls(): void
+    {
+        $this->stubChannels([
+            ['id' => 'sc-1', 'languageId' => 'lang-1', 'domains' => [['languageId' => 'lang-1', 'url' => 'https://a.example.com']]],
+            ['id' => 'sc-2', 'languageId' => 'lang-1', 'domains' => [['languageId' => 'lang-1', 'url' => 'https://b.example.com']]],
+        ]);
+        $this->seoUrlRepositoryMock->expects(self::never())->method('search');
+        $bodies = $this->captureUpsertBodies(['sc-1', 'sc-2'], true);
+        $product = $this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product');
+        foreach (['sc-1', 'sc-2'] as $channel) {
+            $this->service->upsertProduct($product, null, $channel);
+        }
+        self::assertCount(2, $bodies);
+        foreach ($bodies as $body) {
+            self::assertArrayNotHasKey('product_url', $body);
+        }
+    }
+
+    public function testDisabledOtherStorefrontDoesNotMakeDestinationAmbiguous(): void
+    {
+        $this->stubChannels([
+            ['id' => 'sc-1', 'languageId' => 'lang-1', 'domains' => [['languageId' => 'lang-1', 'url' => 'https://a.example.com']]],
+            ['id' => 'sc-2', 'languageId' => 'lang-1', 'domains' => [['languageId' => 'lang-1', 'url' => 'https://b.example.com']]],
+        ]);
+        $this->stubSeoUrls(['product-id-123' => 'product']);
+        $bodies = $this->captureUpsertBodies(['sc-1', 'sc-2'], true, false);
+        $this->service->upsertProduct($this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product'), null, 'sc-1');
+        self::assertSame('https://a.example.com/product', $bodies[0]['product_url']);
+    }
+
+    public function testProductWriteCanDeferUrlResolutionUntilIndexing(): void
+    {
+        $this->seoUrlRepositoryMock->expects(self::never())->method('search');
+        $this->salesChannelRepositoryMock->expects(self::never())->method('search');
+        $bodies = $this->captureUpsertBodies();
+        $this->service->upsertProducts([$this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product')], null, null, false);
+        self::assertArrayNotHasKey('product_url', $bodies[0]);
+    }
+
+    public static function domainOrders(): array
+    {
+        $domains = [
+            ['languageId' => 'lang-1', 'url' => 'http://z.example.com'],
+            ['languageId' => 'lang-1', 'url' => 'https://z.example.com'],
+            ['languageId' => 'lang-1', 'url' => 'https://a.example.com'],
+            ['languageId' => 'other-language', 'url' => 'https://0.example.com'],
+        ];
+
+        return ['forward' => [$domains], 'reverse' => [array_reverse($domains)]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('domainOrders')]
+    public function testDomainSelectionPrefersDefaultLanguageHttpsAndStableUrl(array $domains): void
+    {
+        $this->stubChannels([['id' => 'sc-1', 'languageId' => 'lang-1', 'domains' => $domains]]);
+        $this->stubSeoUrls(['product-id-123' => 'product']);
+        $body = $this->captureUpsertBody($this->makeStandaloneProduct('product-id-123', 'PROD-001', 'Test Product'));
+        self::assertSame('https://a.example.com/product', $body['product_url']);
     }
 
     public function testStorefrontResolutionIsCachedAcrossUpserts(): void
