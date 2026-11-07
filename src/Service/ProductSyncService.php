@@ -422,7 +422,35 @@ class ProductSyncService implements ResetInterface
             ];
         }
 
-        $productsToSync = $allProducts;
+        // A page can contain a child before its parent's indexed child count is current.
+        // Retain root parents and load any missing ones before building child payloads.
+        foreach ($products as $product) {
+            if ($product->getParentId() === null) {
+                $this->parentMap[$product->getId()] = $product;
+            }
+        }
+        $leafParents = [];
+        foreach ($allProducts as $product) {
+            if ($product->getParentId() !== null) {
+                $leafParents[$product->getParentId()] = $product->getParentId();
+            }
+        }
+        $missingParents = array_values(array_diff($leafParents, array_keys($this->parentMap)));
+        if ($missingParents !== []) {
+            $parentCriteria = new Criteria($missingParents);
+            $parentCriteria->addAssociations(['cover.media']);
+            /** @var ProductEntity $parent */
+            foreach ($this->productRepository->search($parentCriteria, $context) as $parent) {
+                $this->parentMap[$parent->getId()] = $parent;
+            }
+        }
+        $productsToSync = [];
+        foreach ($allProducts as $product) {
+            if (! isset($leafParents[$product->getId()])) {
+                $productsToSync[$product->getId()] = $product;
+            }
+        }
+        $productsToSync = array_values($productsToSync);
 
         // Debug: Check if we're getting variants
         $variantCount = 0;

@@ -1149,6 +1149,39 @@ class ProductSyncServiceTest extends TestCase
         $this->assertSame('https://shop.example.com/Cool-Product/SW100', $captured[0]['product_url']);
     }
 
+    public function testChildOnlyBatchLoadsParentBeforePublishing(): void
+    {
+        $child = $this->createMock(ProductEntity::class);
+        $child->method('getId')->willReturn('child');
+        $child->method('getUniqueIdentifier')->willReturn('child');
+        $child->method('getParentId')->willReturn('parent');
+        $child->method('getProductNumber')->willReturn('SKU');
+        $child->method('getName')->willReturn('Child');
+        $parent = $this->createMock(ProductEntity::class);
+        $parent->method('getId')->willReturn('parent');
+        $parent->method('getName')->willReturn('Parent title');
+        $result = $this->createMock(EntitySearchResult::class);
+        $result->method('count')->willReturn(1);
+        $result->method('getElements')->willReturn([$child]);
+        $parents = $this->createMock(EntitySearchResult::class);
+        $parents->method('getIterator')->willReturn(new \ArrayIterator([$parent]));
+        $this->productRepositoryMock->expects(self::exactly(2))->method('search')->willReturnOnConsecutiveCalls($result, $parents);
+        $this->systemConfigServiceMock->method('get')->willReturnCallback(static fn ($key) => match ($key) {
+            'KarlaDelivery.config.shopSlug' => 'test-shop', 'KarlaDelivery.config.apiUrl' => 'https://api.example',
+            'KarlaDelivery.config.apiUsername' => 'user', 'KarlaDelivery.config.apiKey' => 'key', default => null,
+        });
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn(200);
+        $this->httpClientMock->expects(self::once())->method('request')->willReturnCallback(static function ($method, $url, $options) use ($response) {
+            $rows = json_decode($options['body'], true);
+            self::assertSame('Parent title', $rows[0]['title']);
+            self::assertSame('child', $rows[0]['variant_id']);
+
+            return $response;
+        });
+        self::assertFalse($this->service->syncProductBatch(0, 100));
+    }
+
     public function testSyncProductBatchNoMoreProducts(): void
     {
         $productCollection = new ProductCollection([]);
@@ -2322,7 +2355,7 @@ class ProductSyncServiceTest extends TestCase
         $activeVariant->method('getName')->willReturn('Active Variant');
         $activeVariant->method('getId')->willReturn('variant-active-id');
         $activeVariant->method('getUniqueIdentifier')->willReturn('variant-active-id');
-        $activeVariant->method('getParentId')->willReturn('parent-id-456');
+        $activeVariant->method('getParentId')->willReturn('c7bca22753c84d08b6178a50052b4146');
         $activeVariant->method('getParent')->willReturn($parentProduct);
         $activeVariant->method('getChildCount')->willReturn(0);
         $activeVariant->method('getActive')->willReturn(true);
@@ -2397,6 +2430,7 @@ class ProductSyncServiceTest extends TestCase
                     // Should only have 1 variant (the active one)
                     $this->assertCount(1, $body, 'Should only sync active variant');
                     $this->assertEquals('variant-active-id', $body[0]['variant_id']);
+                    $this->assertSame('Parent Product 2', $body[0]['title']);
 
                     return true;
                 })
