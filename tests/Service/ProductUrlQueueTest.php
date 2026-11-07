@@ -67,7 +67,7 @@ final class ProductUrlQueueTest extends TestCase
         });
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::never())->method('error');
-        $decorator = new ProductSeoUrlPersister($inner, $products, $config, $bus, $logger);
+        $decorator = new ProductSeoUrlPersister($inner, $products, $config, $bus, $logger, $this->createMock(EntityRepository::class));
         $decorator->updateSeoUrls($context, $route, $ids, [], $channel);
     }
 
@@ -86,7 +86,7 @@ final class ProductUrlQueueTest extends TestCase
         $bus->method('dispatch')->willThrowException(new \RuntimeException('Queue unavailable'));
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::once())->method('error')->with('Unable to queue indexed product URLs', ['error' => 'Queue unavailable']);
-        (new ProductSeoUrlPersister($inner, $products, $config, $bus, $logger))->updateSeoUrls($context, 'frontend.detail.page', ['product'], [], $channel);
+        (new ProductSeoUrlPersister($inner, $products, $config, $bus, $logger, $this->createMock(EntityRepository::class)))->updateSeoUrls($context, 'frontend.detail.page', ['product'], [], $channel);
     }
 
     public function testCorePersistenceErrorsStillPropagate(): void
@@ -96,9 +96,123 @@ final class ProductUrlQueueTest extends TestCase
         $inner->method('updateSeoUrls')->willThrowException(new \RuntimeException('Core failure'));
         $bus = $this->createMock(MessageBusInterface::class);
         $bus->expects(self::never())->method('dispatch');
-        $decorator = new ProductSeoUrlPersister($inner, $this->createMock(ProductSyncService::class), $this->createMock(SystemConfigService::class), $bus, $this->createMock(LoggerInterface::class));
+        $decorator = new ProductSeoUrlPersister($inner, $this->createMock(ProductSyncService::class), $this->createMock(SystemConfigService::class), $bus, $this->createMock(LoggerInterface::class), $this->createMock(EntityRepository::class));
         $this->expectExceptionMessage('Core failure');
         $decorator->updateSeoUrls(Context::createDefaultContext(), 'frontend.detail.page', ['product'], [], $channel);
+    }
+
+    public static function collisionCases(): array
+    {
+        return ['array' => [false, false, false], 'entity and generator' => [true, false, false], 'global path' => [false, true, false], 'capture failure preserves core' => [false, false, true]];
+    }
+
+    #[DataProvider('collisionCases')]
+    public function testDisplacedProductIsCapturedBeforePersistenceAndRefreshedAfterward(bool $entityInput, bool $global, bool $readFails): void
+    {
+        $context = Context::createDefaultContext();
+        $channel = new SalesChannelEntity();
+        $channel->setId('channel');
+        $products = $this->createMock(ProductSyncService::class);
+        $products->method('getProductUrlLanguage')->willReturn($context->getLanguageId());
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturn(true);
+        $data = ['foreignKey' => 'new-product', 'salesChannelId' => $global ? null : 'channel', 'seoPathInfo' => '/shared'];
+        $input = [$data, ['foreignKey' => 'invalid', 'seoPathInfo' => 'bad', 'error' => 'invalid']];
+        if ($entityInput) {
+            $url = $this->createMock(SeoUrlEntity::class);
+            $url->method('jsonSerialize')->willReturn($data);
+            $input = (static function () use ($url) {
+                yield $url;
+            })();
+        }
+        $existing = $this->createMock(SeoUrlEntity::class);
+        $existing->method('getForeignKey')->willReturn('displaced');
+        $existing->method('getSalesChannelId')->willReturn($global ? null : 'channel');
+        $rows = $this->createMock(EntitySearchResult::class);
+        $rows->method('getIterator')->willReturn(new \ArrayIterator([$existing]));
+        $repository = $this->createMock(EntityRepository::class);
+        $captured = false;
+        $repository->expects(self::once())->method('search')->willReturnCallback(static function ($criteria) use (&$captured, $rows, $readFails, $global, $context) {
+            self::assertSame($context->getLanguageId(), $criteria->getFilters()[1]->getValue());
+            self::assertSame($global ? null : 'channel', $criteria->getFilters()[2]->getValue());
+            self::assertSame(['shared'], $criteria->getFilters()[4]->getValue());
+            $captured = true;
+            if ($readFails) {
+                throw new \RuntimeException('Capture unavailable');
+            }
+
+            return $rows;
+        });
+        $inner = $this->createMock(SeoUrlPersister::class);
+        $persisted = false;
+        $inner->expects(self::once())->method('updateSeoUrls')->willReturnCallback(static function ($context, $route, $ids, $urls) use (&$captured, &$persisted) {
+            self::assertTrue($captured);
+            self::assertIsArray($urls);
+            $persisted = true;
+        });
+        $messages = [];
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->method('dispatch')->willReturnCallback(static function ($message) use (&$messages, &$persisted) {
+            self::assertTrue($persisted);
+            $messages[$message->salesChannelId ?? 'all'] = $message->productIds;
+
+            return new Envelope($message);
+        });
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects($readFails ? self::once() : self::never())->method('error');
+        (new ProductSeoUrlPersister($inner, $products, $config, $bus, $logger, $repository))->updateSeoUrls($context, 'frontend.detail.page', ['new-product'], $input, $channel);
+        self::assertSame($readFails || $global ? ['new-product'] : ['new-product', 'displaced'], $messages['channel']);
+        if ($global) {
+            self::assertSame(['displaced'], $messages['all']);
+        }
+    }
+
+    public function testGlobalRefreshIsolatesDestinationFailuresAndSkipsMissingConfiguration(): void
+    {
+        $products = $this->createMock(ProductSyncService::class);
+        $products->method('getSalesChannelIds')->willReturn(['broken', 'healthy', 'missing-slug', 'missing-api', 'missing-user', 'missing-key']);
+        $products->method('getShopSlug')->willReturnCallback(static fn ($channel) => $channel === 'missing-slug' ? '' : 'shop');
+        $products->expects(self::once())->method('syncIndexedProductIds')->with(['product'], 'healthy');
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturnCallback(static fn ($key, $channel) => match ($key) {
+            'KarlaDelivery.config.productSyncEnabled' => true,
+            'KarlaDelivery.config.apiUrl' => $channel === 'missing-api' ? '' : 'https://api.example',
+            'KarlaDelivery.config.apiUsername' => $channel === 'missing-user' ? '' : 'user',
+            'KarlaDelivery.config.apiKey' => $channel === 'missing-key' ? '' : 'key',
+            default => null,
+        });
+        $cleanup = $this->createMock(CatalogCleanupService::class);
+        $locks = [];
+        $cleanup->method('withCatalogLock')->willReturnCallback(static function ($channel, $work) use (&$locks) {
+            $locks[] = $channel;
+            if ($channel === 'broken') {
+                throw new \RuntimeException('API unavailable');
+            }
+            $work();
+        });
+        $cleanup->method('retireUnavailable')->willReturn(['product']);
+        $queued = [];
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->method('dispatch')->willReturnCallback(static function ($message) use (&$queued) {
+            $queued[] = $message;
+
+            return new Envelope($message);
+        });
+        $handler = new SyncProductUrlsMessageHandler($products, $config, $cleanup, $bus);
+        $handler(new SyncProductUrlsMessage(['product'], null, false, true));
+        self::assertSame([], $locks);
+        self::assertSame(['broken', 'healthy'], array_map(static fn ($message) => $message->salesChannelId, $queued));
+
+        try {
+            $handler($queued[0]);
+            self::fail('Broken destination must retry its own message');
+        } catch (\RuntimeException $error) {
+            self::assertSame('API unavailable', $error->getMessage());
+        }
+        $handler($queued[1]);
+        $handler(new SyncProductUrlsMessage(['product'], 'missing-slug'));
+        $handler(new SyncProductUrlsMessage(['product'], 'unknown'));
+        self::assertSame(['broken', 'healthy'], $locks);
     }
 
     public static function handlerCases(): array
@@ -106,7 +220,7 @@ final class ProductUrlQueueTest extends TestCase
         return [
             'legacy' => [null, 'a', true, [null]],
             'scoped' => [['a', 'b'], 'a', true, ['a']],
-            'global manual edit' => [['a', 'b'], null, true, ['a', 'b']],
+            'global manual edit' => [['a', 'b'], null, true, []],
             'disabled' => [['a'], 'a', false, []],
         ];
     }
@@ -115,6 +229,7 @@ final class ProductUrlQueueTest extends TestCase
     public function testQueuedRefreshUsesOnlyEnabledMatchingCatalogs(?array $channels, ?string $messageChannel, bool $enabled, array $expected): void
     {
         $products = $this->createMock(ProductSyncService::class);
+        $products->method('getShopSlug')->willReturn('shop');
         $products->method('getSalesChannelIds')->willReturn($channels);
         $seen = [];
         $products->expects(self::exactly(count($expected)))->method('syncIndexedProductIds')->willReturnCallback(static function ($ids, $channel) use (&$seen) {
@@ -128,13 +243,16 @@ final class ProductUrlQueueTest extends TestCase
             $work();
         });
         $cleanup->method('retireUnavailable')->willReturn(['product']);
-        (new SyncProductUrlsMessageHandler($products, $config, $cleanup, $this->createMock(MessageBusInterface::class)))(new SyncProductUrlsMessage(['product'], $messageChannel));
+        $bus = $this->createMock(MessageBusInterface::class);
+        $bus->method('dispatch')->willReturnCallback(static fn ($message) => new Envelope($message));
+        (new SyncProductUrlsMessageHandler($products, $config, $cleanup, $bus))(new SyncProductUrlsMessage(['product'], $messageChannel));
         self::assertSame($expected, $seen);
     }
 
     public function testReconciliationSnapshotsIdsBeforeQueuingBoundedBatches(): void
     {
         $products = $this->createMock(ProductSyncService::class);
+        $products->method('getShopSlug')->willReturn('shop');
         $products->method('getSalesChannelIds')->willReturn(['a']);
         $products->expects(self::never())->method('syncIndexedProductIds');
         $config = $this->createMock(SystemConfigService::class);
@@ -171,6 +289,7 @@ final class ProductUrlQueueTest extends TestCase
     public function testRetirementCannotBeUndoneByUpsertingUnavailableIds(): void
     {
         $products = $this->createMock(ProductSyncService::class);
+        $products->method('getShopSlug')->willReturn('shop');
         $products->method('getSalesChannelIds')->willReturn(null);
         $products->expects(self::never())->method('syncIndexedProductIds');
         $config = $this->createMock(SystemConfigService::class);
@@ -186,6 +305,7 @@ final class ProductUrlQueueTest extends TestCase
     public function testAvailabilityOnlyRefreshNeverWritesPreIndexUrls(): void
     {
         $products = $this->createMock(ProductSyncService::class);
+        $products->method('getShopSlug')->willReturn('shop');
         $products->method('getSalesChannelIds')->willReturn(['a']);
         $products->expects(self::never())->method('syncIndexedProductIds');
         $config = $this->createMock(SystemConfigService::class);

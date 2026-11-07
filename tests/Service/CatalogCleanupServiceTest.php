@@ -84,8 +84,8 @@ final class CatalogCleanupServiceTest extends TestCase
         $http->method('request')->willReturnCallback(function (string $method, string $url, array $options) use ($requests, &$pages, $deleteStatus) {
             self::assertSame('Basic ' . base64_encode('user:key'), $options['headers']['Authorization']);
             self::assertStringStartsWith('https://api.example.test/v1/shops/shop-a/products', $url);
-            self::assertContains($method, ['GET', 'DELETE']);
-            self::assertArrayNotHasKey('body', $options);
+            self::assertContains($method, ['GET', 'POST']);
+            self::assertSame($method === 'POST', isset($options['body']));
             $requests[] = [$method, $url];
             $response = $this->createMock(ResponseInterface::class);
             $response->method('getStatusCode')->willReturn($method === 'GET' ? 200 : $deleteStatus);
@@ -143,11 +143,11 @@ final class CatalogCleanupServiceTest extends TestCase
 
     public function testInactiveExistingVariantIsRemovedIdempotently(): void
     {
-        [$service, $requests] = $this->service([$this->product(self::ID)], [], [], [[['product_id' => self::ID, 'variant_id' => self::ID]]], deleteStatus: 404);
+        [$service, $requests] = $this->service([$this->product(self::ID)], [], [], [[['product_id' => self::ID, 'variant_id' => self::ID]]], deleteStatus: 204);
         $service->retireUnavailable([self::ID], 'a');
-        self::assertSame(['GET', 'DELETE'], array_column($requests->getArrayCopy(), 0));
+        self::assertSame(['GET', 'POST'], array_column($requests->getArrayCopy(), 0));
         self::assertStringContainsString('variant_ids=' . self::ID, $requests[0][1]);
-        self::assertStringEndsWith('/' . self::ID . '/variants/' . self::ID, $requests[1][1]);
+        self::assertStringEndsWith('/' . self::ID . '/variants/' . self::ID . '/archive', $requests[1][1]);
     }
 
     public function testSharedDestinationKeepsProductsVisibleInTheOtherStorefront(): void
@@ -174,8 +174,8 @@ final class CatalogCleanupServiceTest extends TestCase
         $rows = [['product_id' => self::ID, 'variant_id' => self::ID], ['product_id' => self::ID, 'variant_id' => self::CHILD], ['product_id' => self::ID, 'variant_id' => self::OTHER], ['product_id' => 'old-parent', 'variant_id' => self::CHILD]];
         [$service, $requests] = $this->service([$parent], [$active, $inactive], [$parent, $active], [$rows]);
         $service->retireUnavailable([self::ID], 'a');
-        self::assertSame(['GET', 'DELETE', 'DELETE', 'DELETE'], array_column($requests->getArrayCopy(), 0));
-        self::assertStringEndsWith('/old-parent/variants/' . self::CHILD, $requests[3][1]);
+        self::assertSame(['GET', 'POST', 'POST', 'POST'], array_column($requests->getArrayCopy(), 0));
+        self::assertStringEndsWith('/old-parent/variants/' . self::CHILD . '/archive', $requests[3][1]);
         self::assertNotContains('https://api.example.test/v1/shops/shop-a/products/' . self::ID . '/variants/' . self::CHILD, array_column($requests->getArrayCopy(), 1));
     }
 
@@ -224,7 +224,7 @@ final class CatalogCleanupServiceTest extends TestCase
         self::assertSame('GET', $requests[0][0]);
         self::assertSame('GET', $requests[1][0]);
         self::assertStringContainsString('page=2', $requests[1][1]);
-        self::assertSame('DELETE', $requests[2][0]);
+        self::assertSame('POST', $requests[2][0]);
     }
 
     public static function invalidResponses(): array

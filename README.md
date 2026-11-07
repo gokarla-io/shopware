@@ -97,7 +97,7 @@ After installation, configure the extension:
 
 Run a full product sync after installing the update to populate existing catalog
 URLs. Realtime URL changes are queued after Shopware persists SEO paths, including
-URL removals and manual SEO edits. Keep a Shopware worker consuming the `async`
+URL removals, manual SEO edits and products displaced by SEO path collisions. Keep a Shopware worker consuming the `async`
 transport and restart workers after updating the plugin; pending jobs delay URL
 updates and catalog cleanup. Failed API requests are retried by Shopware's queue;
 monitor failed messages and retry them after fixing the underlying API issue.
@@ -112,9 +112,11 @@ omits URLs rather than choosing a domain for that shared catalog.
 ### Unavailable product cleanup
 
 Product writes queue availability cleanup independently of SEO templates and
-domain languages. After product indexing or a visibility removal, queued jobs remove existing Karla
-catalog variants that are inactive or no longer visible in an enabled storefront.
-Reactivating a product or restoring visibility publishes it again. If enabled
+domain languages. After product indexing or a visibility removal, queued jobs
+archive existing Karla catalog variants that are inactive or no longer visible
+in an enabled storefront. Archival preserves the catalog UUID and historical
+order, shipment and campaign links. Reactivating a product or restoring visibility
+publishes the same catalog record again. If enabled
 storefronts share a Karla destination, a variant remains while any of them still
 makes it available. Catalog workers serialize cleanup and refreshes per API
 address and shop slug, including the full-catalog snapshot. Busy jobs retry after
@@ -124,7 +126,10 @@ in an active storefront; headless/API-only products are excluded.
 Run a full product sync after upgrading to clean up older stale entries. When the
 active-product sync finishes, it queues reconciliation of the existing Karla
 catalog in batches of 100; allow the async queue to drain before considering the
-cleanup complete. This uses the existing catalog list and variant-delete APIs.
+cleanup complete. This requires the backend variant-archive API before the plugin
+upgrade; cleanup never falls back to physical deletion. Global refreshes fan out
+into independent destination jobs so one failed API cannot block another shop.
+Channels without a resolved shop slug, API URL or credentials are skipped.
 Only entries matched to current native Shopware products are retired. Unknown or
 manually managed catalog entries are preserved; historical entries for products
 already physically deleted need separate investigation. Schedule the backfill

@@ -52,6 +52,7 @@ final class ProductSubscriberTest extends TestCase
         $this->loggerMock = $this->createMock(LoggerInterface::class);
         $this->productRepositoryMock = $this->createMock(EntityRepository::class);
         $this->productSyncServiceMock = $this->createMock(ProductSyncService::class);
+        $this->productSyncServiceMock->method('getShopSlug')->willReturnCallback(fn ($channel) => (string) $this->systemConfigServiceMock->get('KarlaDelivery.config.shopSlug', $channel));
 
         $this->bus = $this->createMock(MessageBusInterface::class);
         $this->bus->method('dispatch')->willReturnCallback(static fn ($message) => new Envelope($message));
@@ -107,14 +108,22 @@ final class ProductSubscriberTest extends TestCase
      * @covers ::syncProducts
      * @covers ::onProductWritten
      */
-    public function testOnProductWrittenSkipsWhenConfigMissing(): void
+    public static function missingDestinationCases(): array
     {
+        return ['global missing slug' => [null], 'scoped headless missing slug' => ['headless']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('missingDestinationCases')]
+    public function testOnProductWrittenSkipsWhenConfigMissing(?string $channel): void
+    {
+        $this->productSyncServiceMock->method('getSalesChannelIds')->willReturn($channel === null ? null : [$channel]);
+        $this->bus->expects(self::never())->method('dispatch');
         $this->systemConfigServiceMock->method('get')->willReturnMap([
-            ['KarlaDelivery.config.productSyncEnabled', null, true],
-            ['KarlaDelivery.config.shopSlug', null, ''], // Missing
-            ['KarlaDelivery.config.apiUsername', null, 'user'],
-            ['KarlaDelivery.config.apiKey', null, 'key'],
-            ['KarlaDelivery.config.apiUrl', null, 'https://api.test.com'],
+            ['KarlaDelivery.config.productSyncEnabled', $channel, true],
+            ['KarlaDelivery.config.shopSlug', $channel, ''], // Missing
+            ['KarlaDelivery.config.apiUsername', $channel, 'user'],
+            ['KarlaDelivery.config.apiKey', $channel, 'key'],
+            ['KarlaDelivery.config.apiUrl', $channel, 'https://api.test.com'],
         ]);
 
         $event = $this->createMock(EntityWrittenEvent::class);

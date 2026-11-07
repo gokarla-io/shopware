@@ -87,12 +87,12 @@ class ProductSubscriber implements EventSubscriberInterface
         }
 
         // Verify API configuration
-        $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug', $salesChannelId) ?? '';
+        $shopSlug = $this->productSyncService->getShopSlug($salesChannelId);
         $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId) ?? '';
         $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId) ?? '';
         $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId) ?? '';
 
-        if (($salesChannelId === null && empty($shopSlug)) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
+        if (empty($shopSlug) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
             $this->logger->warning('Product sync skipped - missing configuration', [
                 'component' => 'product.sync',
             ]);
@@ -233,12 +233,12 @@ class ProductSubscriber implements EventSubscriberInterface
 
         try {
             // Verify API configuration
-            $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug', $salesChannelId) ?? '';
+            $shopSlug = $this->productSyncService->getShopSlug($salesChannelId);
             $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId) ?? '';
             $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId) ?? '';
             $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId) ?? '';
 
-            if (($salesChannelId === null && empty($shopSlug)) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
+            if (empty($shopSlug) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
                 $this->logger->warning('Product deletion sync skipped - missing configuration', [
                     'component' => 'product.sync',
                 ]);

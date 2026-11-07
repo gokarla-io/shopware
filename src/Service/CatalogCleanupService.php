@@ -109,7 +109,7 @@ class CatalogCleanupService
             foreach ($rows as $row) {
                 if (! isset($keep[$row['product_id'] . ':' . $row['variant_id']])) {
                     $url = $this->endpoint($channel) . '/' . rawurlencode($row['product_id']) . '/variants/' . rawurlencode($row['variant_id']);
-                    $this->api->request($url, 'DELETE', [], $channel, allowMissingVariant: true);
+                    $this->api->request($url . '/archive', 'POST', [], $channel);
                 }
             }
         }
