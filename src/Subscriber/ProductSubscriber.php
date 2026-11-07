@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Karla\Delivery\Subscriber;
 
+use Karla\Delivery\Message\SyncProductUrlsMessage;
 use Karla\Delivery\Service\ProductSyncService;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Content\Product\ProductEntity;
@@ -15,6 +16,7 @@ use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 class ProductSubscriber implements EventSubscriberInterface
 {
@@ -27,7 +29,8 @@ class ProductSubscriber implements EventSubscriberInterface
         SystemConfigService $systemConfigService,
         LoggerInterface $logger,
         EntityRepository $productRepository,
-        ProductSyncService $productSyncService
+        ProductSyncService $productSyncService,
+        private MessageBusInterface $bus
     ) {
         $this->logger = $logger;
         $this->productRepository = $productRepository;
@@ -61,7 +64,17 @@ class ProductSubscriber implements EventSubscriberInterface
     {
         if ($this->isSyncConfigured($salesChannelId)) {
             // product.written precedes SEO indexing, so preserve existing URLs.
-            $this->syncProducts($event->getIds(), $event->getContext(), $salesChannelId);
+            $ids = $event->getIds();
+            $this->syncProducts($ids, $event->getContext(), $salesChannelId);
+            // Availability must not depend on an SEO template or a selected domain language.
+            // Keep URLs untouched until the separate post-index refresh.
+            if ($ids !== []) {
+                try {
+                    $this->bus->dispatch(new SyncProductUrlsMessage($ids, $salesChannelId, refreshUrls: false));
+                } catch (\Throwable $error) {
+                    $this->logger->error('Unable to queue product availability cleanup', ['error' => $error->getMessage()]);
+                }
+            }
         }
     }
 

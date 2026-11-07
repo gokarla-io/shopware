@@ -23,18 +23,19 @@ final class SyncProductUrlsMessageHandler
                 continue;
             }
             if ($this->config->get('KarlaDelivery.config.productSyncEnabled', $channel)) {
-                if ($message->reconcile) {
-                    foreach (array_chunk($this->cleanup->catalogVariantIds($channel), 100) as $ids) {
-                        $this->bus->dispatch(new SyncProductUrlsMessage($ids, $channel));
-                    }
-                } else {
-                    $this->cleanup->withCatalogLock($channel, function () use ($message, $channel): void {
+                $this->cleanup->withCatalogLock($channel, function () use ($message, $channel): void {
+                    if ($message->reconcile) {
+                        // Keep other cleanup jobs from shifting offset pages during the snapshot.
+                        foreach (array_chunk($this->cleanup->catalogVariantIds($channel), 100) as $ids) {
+                            $this->bus->dispatch(new SyncProductUrlsMessage($ids, $channel));
+                        }
+                    } else {
                         $ids = $this->cleanup->retireUnavailable($message->productIds, $channel);
-                        if ($ids !== []) {
+                        if ($message->refreshUrls && $ids !== []) {
                             $this->products->syncIndexedProductIds($ids, $channel);
                         }
-                    });
-                }
+                    }
+                });
             }
         }
     }

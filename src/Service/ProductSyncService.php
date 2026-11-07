@@ -83,6 +83,9 @@ class ProductSyncService implements ResetInterface
     {
         if ($salesChannelId !== null) {
             $criteria->addFilter(new EqualsFilter('visibilities.salesChannelId', $salesChannelId));
+        } else {
+            $criteria->addFilter(new EqualsFilter('visibilities.salesChannel.active', true));
+            $criteria->addFilter(new EqualsFilter('visibilities.salesChannel.typeId', Defaults::SALES_CHANNEL_TYPE_STOREFRONT));
         }
     }
 
@@ -311,6 +314,7 @@ class ProductSyncService implements ResetInterface
 
                 $variantCriteria = new Criteria($variantIds);
                 $this->scopeCriteria($variantCriteria, $salesChannelId);
+                $variantCriteria->addFilter(new EqualsFilter('active', true));
                 $variantCriteria->addAssociations([
                     'cover.media',
                     'translations.language.locale',

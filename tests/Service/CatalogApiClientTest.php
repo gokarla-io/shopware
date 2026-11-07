@@ -16,11 +16,11 @@ final class CatalogApiClientTest extends TestCase
 {
     public static function requests(): array
     {
-        return ['read' => ['GET', 200, false, false], 'create debug' => ['POST', 201, true, false], 'update' => ['PUT', 200, false, false], 'idempotent delete' => ['DELETE', 404, false, false], 'server failure' => ['GET', 503, false, true]];
+        return ['read' => ['GET', 200, false, false, false], 'create debug' => ['POST', 201, true, false, false], 'update' => ['PUT', 200, false, false, false], 'idempotent delete' => ['DELETE', 404, false, false, true], 'missing product remains an error' => ['DELETE', 404, false, true, false], 'server failure' => ['GET', 503, false, true, false]];
     }
 
     #[DataProvider('requests')]
-    public function testRequestsAuthenticateAndMakeFailuresRetryable(string $method, int $status, bool $debug, bool $fails): void
+    public function testRequestsAuthenticateAndMakeFailuresRetryable(string $method, int $status, bool $debug, bool $fails, bool $allowMissing): void
     {
         $config = $this->createMock(SystemConfigService::class);
         $config->method('get')->willReturnCallback(static fn ($key) => match ($key) {
@@ -41,9 +41,9 @@ final class CatalogApiClientTest extends TestCase
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects($debug ? self::exactly(2) : self::never())->method('debug');
         if ($fails) {
-            $this->expectExceptionMessage('Karla catalog API returned HTTP 503');
+            $this->expectExceptionMessage('Karla catalog API returned HTTP ' . $status);
         }
-        $result = (new CatalogApiClient($http, $config, $logger))->request('https://api.example/products', $method, ['title' => 'Product'], 'a');
+        $result = (new CatalogApiClient($http, $config, $logger))->request('https://api.example/products', $method, ['title' => 'Product'], 'a', $allowMissing);
         self::assertSame($response, $result);
     }
 

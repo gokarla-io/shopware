@@ -15,7 +15,7 @@ final class CatalogApiClient
     {
     }
 
-    public function request(string $url, string $method, array $data, ?string $salesChannelId): ResponseInterface
+    public function request(string $url, string $method, array $data, ?string $salesChannelId, bool $allowMissingVariant = false): ResponseInterface
     {
         $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId);
         $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId);
@@ -54,7 +54,7 @@ final class CatalogApiClient
 
         $response = $this->httpClient->request($method, $url, $requestOptions);
         $statusCode = $response->getStatusCode();
-        if ($statusCode >= 400 && ! ($method === 'DELETE' && $statusCode === 404)) {
+        if ($statusCode >= 400 && ! ($allowMissingVariant && $method === 'DELETE' && $statusCode === 404)) {
             throw new \RuntimeException('Karla catalog API returned HTTP ' . $statusCode);
         }
 

@@ -160,7 +160,7 @@ final class SalesChannelProductSyncTest extends TestCase
         $service->expects(self::once())->method('scopeCriteria')->with(self::isInstanceOf(Criteria::class), 'second');
         $service->expects(self::once())->method('upsertProducts')->with([$product], null, 'second', false);
         $service->expects(self::once())->method('deleteProduct')->with('product', 'second');
-        $subscriber = new ProductSubscriber($config, new NullLogger(), $repository, $service);
+        $subscriber = new ProductSubscriber($config, new NullLogger(), $repository, $service, $this->createMock(MessageBusInterface::class));
         $context = Context::createDefaultContext();
         $written = $this->createMock(EntityWrittenEvent::class);
         $written->method('getContext')->willReturn($context);
@@ -176,7 +176,7 @@ final class SalesChannelProductSyncTest extends TestCase
     {
         $service = $this->createMock(ProductSyncService::class);
         $service->method('getSalesChannelIds')->willThrowException(new \RuntimeException('Database unavailable'));
-        $subscriber = new ProductSubscriber($this->createMock(SystemConfigService::class), new NullLogger(), $this->createMock(EntityRepository::class), $service);
+        $subscriber = new ProductSubscriber($this->createMock(SystemConfigService::class), new NullLogger(), $this->createMock(EntityRepository::class), $service, $this->createMock(MessageBusInterface::class));
         $service->expects(self::never())->method('upsertProduct');
         $service->expects(self::never())->method('deleteProduct');
         $subscriber->onProductWritten($this->createMock(EntityWrittenEvent::class));

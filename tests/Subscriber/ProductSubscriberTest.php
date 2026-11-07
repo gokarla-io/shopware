@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Karla\Delivery\Tests\Subscriber;
 
+use Karla\Delivery\Message\SyncProductUrlsMessage;
 use Karla\Delivery\Service\ProductSyncService;
 use Karla\Delivery\Subscriber\ProductSubscriber;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -18,6 +19,8 @@ use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * @internal
@@ -38,6 +41,9 @@ final class ProductSubscriberTest extends TestCase
     /** @var ProductSyncService&MockObject */
     private ProductSyncService $productSyncServiceMock;
 
+    /** @var MessageBusInterface&MockObject */
+    private MessageBusInterface $bus;
+
     private ProductSubscriber $subscriber;
 
     protected function setUp(): void
@@ -47,11 +53,14 @@ final class ProductSubscriberTest extends TestCase
         $this->productRepositoryMock = $this->createMock(EntityRepository::class);
         $this->productSyncServiceMock = $this->createMock(ProductSyncService::class);
 
+        $this->bus = $this->createMock(MessageBusInterface::class);
+        $this->bus->method('dispatch')->willReturnCallback(static fn ($message) => new Envelope($message));
         $this->subscriber = new ProductSubscriber(
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->productRepositoryMock,
-            $this->productSyncServiceMock
+            $this->productSyncServiceMock,
+            $this->bus
         );
     }
 
@@ -180,7 +189,13 @@ final class ProductSubscriberTest extends TestCase
      * @covers ::syncProducts
      * @covers ::onProductWritten
      */
-    public function testOnProductWrittenSkipsInactiveProduct(): void
+    public static function availabilityQueueCases(): array
+    {
+        return ['queued without SEO' => [false], 'queue failure is logged' => [true]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('availabilityQueueCases')]
+    public function testOnProductWrittenSkipsInactiveProduct(bool $queueFails): void
     {
         $productId = Uuid::randomHex();
 
@@ -209,6 +224,18 @@ final class ProductSubscriberTest extends TestCase
         $event->method('getContext')->willReturn(Context::createDefaultContext());
         $event->method('getIds')->willReturn([$productId]);
 
+        if ($queueFails) {
+            $this->bus->method('dispatch')->willThrowException(new \RuntimeException('Queue down'));
+            $this->loggerMock->expects(self::once())->method('error')->with('Unable to queue product availability cleanup', ['error' => 'Queue down']);
+        } else {
+            $this->bus->expects(self::once())->method('dispatch')->willReturnCallback(static function ($message) use ($productId) {
+                self::assertInstanceOf(SyncProductUrlsMessage::class, $message);
+                self::assertSame([$productId], $message->productIds);
+                self::assertFalse($message->refreshUrls);
+
+                return new Envelope($message);
+            });
+        }
         $this->subscriber->onProductWritten($event);
     }
 

@@ -111,12 +111,13 @@ omits URLs rather than choosing a domain for that shared catalog.
 
 ### Unavailable product cleanup
 
-After product indexing or a visibility removal, queued jobs remove existing Karla
+Product writes queue availability cleanup independently of SEO templates and
+domain languages. After product indexing or a visibility removal, queued jobs remove existing Karla
 catalog variants that are inactive or no longer visible in an enabled storefront.
 Reactivating a product or restoring visibility publishes it again. If enabled
 storefronts share a Karla destination, a variant remains while any of them still
 makes it available. Catalog workers serialize cleanup and refreshes per API
-address and shop slug.
+address and shop slug, including the full-catalog snapshot.
 
 Run a full product sync after upgrading to clean up older stale entries. When the
 active-product sync finishes, it queues reconciliation of the existing Karla

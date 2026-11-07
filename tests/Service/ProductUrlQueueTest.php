@@ -140,12 +140,16 @@ final class ProductUrlQueueTest extends TestCase
         $config = $this->createMock(SystemConfigService::class);
         $config->method('get')->willReturn(true);
         $cleanup = $this->createMock(CatalogCleanupService::class);
-        $cleanup->method('withCatalogLock')->willReturnCallback(static function ($channel, $work) {
+        $locked = false;
+        $cleanup->expects(self::once())->method('withCatalogLock')->with('a', self::isType('callable'))->willReturnCallback(static function ($channel, $work) use (&$locked) {
+            $locked = true;
             $work();
+            $locked = false;
         });
         $ids = array_map('strval', range(1, 101));
         $readComplete = false;
-        $cleanup->expects(self::once())->method('catalogVariantIds')->with('a')->willReturnCallback(static function () use (&$readComplete, $ids) {
+        $cleanup->expects(self::once())->method('catalogVariantIds')->with('a')->willReturnCallback(static function () use (&$readComplete, $ids, &$locked) {
+            self::assertTrue($locked);
             $readComplete = true;
 
             return $ids;
@@ -177,6 +181,21 @@ final class ProductUrlQueueTest extends TestCase
         });
         $cleanup->expects(self::once())->method('retireUnavailable')->with(['inactive'], null)->willReturn([]);
         (new SyncProductUrlsMessageHandler($products, $config, $cleanup, $this->createMock(MessageBusInterface::class)))(new SyncProductUrlsMessage(['inactive'], null));
+    }
+
+    public function testAvailabilityOnlyRefreshNeverWritesPreIndexUrls(): void
+    {
+        $products = $this->createMock(ProductSyncService::class);
+        $products->method('getSalesChannelIds')->willReturn(['a']);
+        $products->expects(self::never())->method('syncIndexedProductIds');
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturn(true);
+        $cleanup = $this->createMock(CatalogCleanupService::class);
+        $cleanup->method('withCatalogLock')->willReturnCallback(static function ($channel, $work) {
+            $work();
+        });
+        $cleanup->expects(self::once())->method('retireUnavailable')->with(['active'], 'a')->willReturn(['active']);
+        (new SyncProductUrlsMessageHandler($products, $config, $cleanup, $this->createMock(MessageBusInterface::class)))(new SyncProductUrlsMessage(['active'], 'a', refreshUrls: false));
     }
 
     public function testManualSeoWritesAreGroupedByChannelAndDeduplicated(): void

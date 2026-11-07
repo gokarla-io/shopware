@@ -94,6 +94,7 @@
             <argument type="service" id="monolog.logger.karla_delivery"/>
             <argument type="service" id="product.repository"/>
             <argument type="service" id="Karla\Delivery\Service\ProductSyncService"/>
+            <argument type="service" id="messenger.default_bus"/>
             <tag name="kernel.event_subscriber"/>
         </service>
 
