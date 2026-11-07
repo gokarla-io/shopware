@@ -31,10 +31,11 @@ final class ProductSeoUrlPersister extends SeoUrlPersister
             $channel = $salesChannel->getId();
             if ($routeName !== 'frontend.detail.page' || $foreignKeys === []
                 || ! $this->config->get('KarlaDelivery.config.productSyncEnabled', $channel)
-                || $context->getLanguageId() !== $this->products->getProductUrlLanguage($channel)) {
+                || $context->getLanguageId() !== ($this->products->getProductUrlLanguage($channel) ?? $salesChannel->getLanguageId())) {
                 return;
             }
             // Include original IDs even when no SEO row was generated (URL removal).
+            // Shared catalogs omit URLs but still need cleanup in the default channel language.
             // Only the selected storefront language queues work, avoiding language duplicates.
             $this->bus->dispatch(new SyncProductUrlsMessage(array_values(array_unique($foreignKeys)), $channel));
         } catch (\Throwable $error) {

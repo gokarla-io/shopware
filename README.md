@@ -98,8 +98,9 @@ After installation, configure the extension:
 Run a full product sync after installing the update to populate existing catalog
 URLs. Realtime URL changes are queued after Shopware persists SEO paths, including
 URL removals and manual SEO edits. Keep a Shopware worker consuming the `async`
-transport and restart workers after updating the plugin; pending jobs delay URL updates. Failed API requests are retried by
-Shopware's queue.
+transport and restart workers after updating the plugin; pending jobs delay URL
+updates and catalog cleanup. Failed API requests are retried by Shopware's queue;
+monitor failed messages and retry them after fixing the underlying API issue.
 
 URLs use the storefront's default-language domain when available, prefer HTTPS,
 and fall back from a variant's URL to its parent's. Keep the configured domains
@@ -107,6 +108,23 @@ customer-facing. With multiple storefronts, configure one Karla destination per
 storefront or enable product sync for only one storefront per destination. If
 several enabled storefronts share the same API address and shop slug, the plugin
 omits URLs rather than choosing a domain for that shared catalog.
+
+### Unavailable product cleanup
+
+After product indexing or a visibility removal, queued jobs remove existing Karla
+catalog variants that are inactive or no longer visible in an enabled storefront.
+Reactivating a product or restoring visibility publishes it again. If enabled
+storefronts share a Karla destination, a variant remains while any of them still
+makes it available. Catalog workers serialize cleanup and refreshes per API
+address and shop slug.
+
+Run a full product sync after upgrading to clean up older stale entries. When the
+active-product sync finishes, it queues reconciliation of the existing Karla
+catalog in batches of 100; allow the async queue to drain before considering the
+cleanup complete. This uses the existing catalog list and variant-delete APIs.
+Only entries matched to current native Shopware products are retired. Unknown or
+manually managed catalog entries are preserved; historical entries for products
+already physically deleted need separate investigation.
 
 ## Support
 

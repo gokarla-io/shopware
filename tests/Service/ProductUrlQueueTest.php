@@ -6,6 +6,7 @@ namespace Karla\Delivery\Tests\Service;
 
 use Karla\Delivery\Message\SyncProductUrlsMessage;
 use Karla\Delivery\MessageHandler\SyncProductUrlsMessageHandler;
+use Karla\Delivery\Service\CatalogCleanupService;
 use Karla\Delivery\Service\ProductSeoUrlPersister;
 use Karla\Delivery\Service\ProductSyncService;
 use Karla\Delivery\Subscriber\SeoUrlSubscriber;
@@ -33,23 +34,25 @@ final class ProductUrlQueueTest extends TestCase
             'other route' => ['frontend.navigation.page', ['category'], true, true, false],
             'empty batch' => ['frontend.detail.page', [], true, true, false],
             'disabled sync' => ['frontend.detail.page', ['product'], false, true, false],
+            'shared catalog without a URL language' => ['frontend.detail.page', ['product'], true, null, true],
             'other language' => ['frontend.detail.page', ['product'], true, false, false],
         ];
     }
 
     #[DataProvider('persistenceCases')]
-    public function testPersistenceQueuesOriginalIdsOnlyAfterCommitAndInSelectedLanguage(string $route, array $ids, bool $enabled, bool $selected, bool $queued): void
+    public function testPersistenceQueuesOriginalIdsOnlyAfterCommitAndInSelectedLanguage(string $route, array $ids, bool $enabled, ?bool $selected, bool $queued): void
     {
         $context = Context::createDefaultContext();
         $channel = new SalesChannelEntity();
         $channel->setId('channel');
+        $channel->setLanguageId($context->getLanguageId());
         $inner = $this->createMock(SeoUrlPersister::class);
         $persisted = false;
         $inner->expects(self::once())->method('updateSeoUrls')->with($context, $route, $ids, [], $channel)->willReturnCallback(static function () use (&$persisted) {
             $persisted = true;
         });
         $products = $this->createMock(ProductSyncService::class);
-        $products->method('getProductUrlLanguage')->willReturn($selected ? $context->getLanguageId() : 'other-language');
+        $products->method('getProductUrlLanguage')->willReturn($selected === null ? null : ($selected ? $context->getLanguageId() : 'other-language'));
         $config = $this->createMock(SystemConfigService::class);
         $config->method('get')->willReturn($enabled);
         $bus = $this->createMock(MessageBusInterface::class);
@@ -120,8 +123,60 @@ final class ProductUrlQueueTest extends TestCase
         });
         $config = $this->createMock(SystemConfigService::class);
         $config->method('get')->willReturn($enabled);
-        (new SyncProductUrlsMessageHandler($products, $config))(new SyncProductUrlsMessage(['product'], $messageChannel));
+        $cleanup = $this->createMock(CatalogCleanupService::class);
+        $cleanup->method('withCatalogLock')->willReturnCallback(static function ($channel, $work) {
+            $work();
+        });
+        $cleanup->method('retireUnavailable')->willReturn(['product']);
+        (new SyncProductUrlsMessageHandler($products, $config, $cleanup, $this->createMock(MessageBusInterface::class)))(new SyncProductUrlsMessage(['product'], $messageChannel));
         self::assertSame($expected, $seen);
+    }
+
+    public function testReconciliationSnapshotsIdsBeforeQueuingBoundedBatches(): void
+    {
+        $products = $this->createMock(ProductSyncService::class);
+        $products->method('getSalesChannelIds')->willReturn(['a']);
+        $products->expects(self::never())->method('syncIndexedProductIds');
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturn(true);
+        $cleanup = $this->createMock(CatalogCleanupService::class);
+        $cleanup->method('withCatalogLock')->willReturnCallback(static function ($channel, $work) {
+            $work();
+        });
+        $ids = array_map('strval', range(1, 101));
+        $readComplete = false;
+        $cleanup->expects(self::once())->method('catalogVariantIds')->with('a')->willReturnCallback(static function () use (&$readComplete, $ids) {
+            $readComplete = true;
+
+            return $ids;
+        });
+        $bus = $this->createMock(MessageBusInterface::class);
+        $sizes = [];
+        $bus->expects(self::exactly(2))->method('dispatch')->willReturnCallback(static function ($message) use (&$sizes, &$readComplete) {
+            self::assertTrue($readComplete);
+            self::assertSame('a', $message->salesChannelId);
+            self::assertFalse($message->reconcile);
+            $sizes[] = count($message->productIds);
+
+            return new Envelope($message);
+        });
+        (new SyncProductUrlsMessageHandler($products, $config, $cleanup, $bus))(new SyncProductUrlsMessage([], 'a', true));
+        self::assertSame([100, 1], $sizes);
+    }
+
+    public function testRetirementCannotBeUndoneByUpsertingUnavailableIds(): void
+    {
+        $products = $this->createMock(ProductSyncService::class);
+        $products->method('getSalesChannelIds')->willReturn(null);
+        $products->expects(self::never())->method('syncIndexedProductIds');
+        $config = $this->createMock(SystemConfigService::class);
+        $config->method('get')->willReturn(true);
+        $cleanup = $this->createMock(CatalogCleanupService::class);
+        $cleanup->method('withCatalogLock')->willReturnCallback(static function ($channel, $work) {
+            $work();
+        });
+        $cleanup->expects(self::once())->method('retireUnavailable')->with(['inactive'], null)->willReturn([]);
+        (new SyncProductUrlsMessageHandler($products, $config, $cleanup, $this->createMock(MessageBusInterface::class)))(new SyncProductUrlsMessage(['inactive'], null));
     }
 
     public function testManualSeoWritesAreGroupedByChannelAndDeduplicated(): void

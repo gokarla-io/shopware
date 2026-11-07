@@ -6,6 +6,7 @@ namespace Karla\Delivery\Tests\Service;
 
 use Doctrine\DBAL\Connection;
 use Karla\Delivery\Message\SyncAllProductsMessage;
+use Karla\Delivery\Message\SyncProductUrlsMessage;
 use Karla\Delivery\MessageHandler\SyncAllProductsMessageHandler;
 use Karla\Delivery\Service\ProductSyncService;
 use Karla\Delivery\Subscriber\ProductSubscriber;
@@ -105,9 +106,16 @@ final class SalesChannelProductSyncTest extends TestCase
             $config->expects(self::once())->method('set')->with('KarlaDelivery.config.productSyncStatus', 'completed', 'second');
         }
         $bus = $this->createMock(MessageBusInterface::class);
-        $bus->expects($more ? self::once() : self::never())->method('dispatch')->willReturnCallback(static function (SyncAllProductsMessage $next) {
-            self::assertSame('second', $next->getSalesChannelId());
-            self::assertSame(100, $next->getOffset());
+        $bus->expects($enabled ? self::once() : self::never())->method('dispatch')->willReturnCallback(static function ($next) use ($more) {
+            if ($more) {
+                self::assertInstanceOf(SyncAllProductsMessage::class, $next);
+                self::assertSame('second', $next->getSalesChannelId());
+                self::assertSame(100, $next->getOffset());
+            } else {
+                self::assertInstanceOf(SyncProductUrlsMessage::class, $next);
+                self::assertSame('second', $next->salesChannelId);
+                self::assertTrue($next->reconcile);
+            }
 
             return new Envelope($next);
         });
