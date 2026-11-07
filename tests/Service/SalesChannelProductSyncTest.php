@@ -90,6 +90,26 @@ final class SalesChannelProductSyncTest extends TestCase
         }
     }
 
+    public function testLegacyBatchConsidersInheritedActivityAndStorefrontVisibility(): void
+    {
+        $repository = $this->createMock(EntityRepository::class);
+        $repository->expects(self::once())->method('search')->willReturnCallback(static function (Criteria $criteria, Context $context) {
+            self::assertTrue($context->considerInheritance());
+            $filters = [];
+            foreach ($criteria->getFilters() as $filter) {
+                self::assertInstanceOf(\Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter::class, $filter);
+                $filters[$filter->getField()] = $filter->getValue();
+            }
+            self::assertTrue($filters['active']);
+            self::assertTrue($filters['visibilities.salesChannel.active']);
+            self::assertSame(\Shopware\Core\Defaults::SALES_CHANNEL_TYPE_STOREFRONT, $filters['visibilities.salesChannel.typeId']);
+
+            return new EntitySearchResult('product', 0, new ProductCollection(), null, $criteria, $context);
+        });
+        $service = new ProductSyncService($repository, $this->createMock(HttpClientInterface::class), $this->createMock(SystemConfigService::class), new NullLogger(), $this->createMock(Connection::class), $this->createMock(EntityRepository::class), $this->createMock(EntityRepository::class));
+        self::assertFalse($service->syncProductBatch(0, 100));
+    }
+
     public static function batchStates(): array
     {
         return ['continue' => [true, true], 'complete' => [true, false], 'disabled' => [false, false]];

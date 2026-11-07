@@ -32,7 +32,7 @@ class CatalogCleanupService
         }
         $key = hash('sha256', 'karla-catalog:' . $this->endpoint($channel));
         if ((int) $this->connection->fetchOne('SELECT GET_LOCK(?, 0)', [$key]) !== 1) {
-            throw new RecoverableMessageHandlingException('Another catalog refresh is running');
+            throw new RecoverableMessageHandlingException('Another catalog refresh is running', retryDelay: 5000);
         }
 
         try {

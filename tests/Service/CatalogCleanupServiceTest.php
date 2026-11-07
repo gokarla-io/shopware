@@ -129,10 +129,16 @@ final class CatalogCleanupServiceTest extends TestCase
         $connection = $this->createMock(Connection::class);
         $connection->expects(self::once())->method('fetchOne')->willReturn(0);
         [$service, $requests] = $this->service([], [], [], [], connection: $connection);
-        $this->expectException(RecoverableMessageHandlingException::class);
-        $service->withCatalogLock('a', static function () {
-            self::fail('Busy work must not run');
-        });
+
+        try {
+            $service->withCatalogLock('a', static function () {
+                self::fail('Busy work must not run');
+            });
+            self::fail('Busy catalog must retry');
+        } catch (RecoverableMessageHandlingException $error) {
+            self::assertSame(5000, $error->getRetryDelay());
+            self::assertCount(0, $requests);
+        }
     }
 
     public function testInactiveExistingVariantIsRemovedIdempotently(): void

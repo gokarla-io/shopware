@@ -117,7 +117,9 @@ catalog variants that are inactive or no longer visible in an enabled storefront
 Reactivating a product or restoring visibility publishes it again. If enabled
 storefronts share a Karla destination, a variant remains while any of them still
 makes it available. Catalog workers serialize cleanup and refreshes per API
-address and shop slug, including the full-catalog snapshot.
+address and shop slug, including the full-catalog snapshot. Busy jobs retry after
+five seconds. In legacy global configuration, publishing now requires visibility
+in an active storefront; headless/API-only products are excluded.
 
 Run a full product sync after upgrading to clean up older stale entries. When the
 active-product sync finishes, it queues reconciliation of the existing Karla
@@ -125,7 +127,8 @@ catalog in batches of 100; allow the async queue to drain before considering the
 cleanup complete. This uses the existing catalog list and variant-delete APIs.
 Only entries matched to current native Shopware products are retired. Unknown or
 manually managed catalog entries are preserved; historical entries for products
-already physically deleted need separate investigation.
+already physically deleted need separate investigation. Schedule the backfill
+without concurrent physical product deletions, which use the existing delete path.
 
 ## Support
 

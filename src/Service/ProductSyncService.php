@@ -188,7 +188,7 @@ class ProductSyncService implements ResetInterface
     public function syncProductBatch(int $offset, int $limit, ?string $salesChannelId = null): bool
     {
         $context = Context::createDefaultContext();
-        $context->setConsiderInheritance($salesChannelId !== null);
+        $context->setConsiderInheritance(true);
         $this->parentMap = [];
 
         $criteria = new Criteria();
