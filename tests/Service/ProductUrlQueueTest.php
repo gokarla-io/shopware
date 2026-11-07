@@ -103,11 +103,11 @@ final class ProductUrlQueueTest extends TestCase
 
     public static function collisionCases(): array
     {
-        return ['array' => [false, false, false], 'entity and generator' => [true, false, false], 'global path' => [false, true, false], 'capture failure preserves core' => [false, false, true]];
+        return ['zero path' => [false, false, false, '0'], 'array' => [false, false, false], 'entity and generator' => [true, false, false], 'global path' => [false, true, false], 'capture failure preserves core' => [false, false, true]];
     }
 
     #[DataProvider('collisionCases')]
-    public function testDisplacedProductIsCapturedBeforePersistenceAndRefreshedAfterward(bool $entityInput, bool $global, bool $readFails): void
+    public function testDisplacedProductIsCapturedBeforePersistenceAndRefreshedAfterward(bool $entityInput, bool $global, bool $readFails, string $path = '/shared'): void
     {
         $context = Context::createDefaultContext();
         $channel = new SalesChannelEntity();
@@ -116,7 +116,7 @@ final class ProductUrlQueueTest extends TestCase
         $products->method('getProductUrlLanguage')->willReturn($context->getLanguageId());
         $config = $this->createMock(SystemConfigService::class);
         $config->method('get')->willReturn(true);
-        $data = ['foreignKey' => 'new-product', 'salesChannelId' => $global ? null : 'channel', 'seoPathInfo' => '/shared'];
+        $data = ['foreignKey' => 'new-product', 'salesChannelId' => $global ? null : 'channel', 'seoPathInfo' => $path];
         $input = [$data, ['foreignKey' => 'invalid', 'seoPathInfo' => 'bad', 'error' => 'invalid']];
         if ($entityInput) {
             $url = $this->createMock(SeoUrlEntity::class);
@@ -132,10 +132,10 @@ final class ProductUrlQueueTest extends TestCase
         $rows->method('getIterator')->willReturn(new \ArrayIterator([$existing]));
         $repository = $this->createMock(EntityRepository::class);
         $captured = false;
-        $repository->expects(self::once())->method('search')->willReturnCallback(static function ($criteria) use (&$captured, $rows, $readFails, $global, $context) {
+        $repository->expects(self::once())->method('search')->willReturnCallback(static function ($criteria) use (&$captured, $rows, $readFails, $global, $context, $path) {
             self::assertSame($context->getLanguageId(), $criteria->getFilters()[1]->getValue());
             self::assertSame($global ? null : 'channel', $criteria->getFilters()[2]->getValue());
-            self::assertSame(['shared'], $criteria->getFilters()[4]->getValue());
+            self::assertSame([ltrim($path, '/')], $criteria->getFilters()[4]->getValue());
             $captured = true;
             if ($readFails) {
                 throw new \RuntimeException('Capture unavailable');

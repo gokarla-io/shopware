@@ -46,7 +46,7 @@ final class ProductSeoUrlPersister extends SeoUrlPersister
                 $paths = [];
                 foreach ($seoUrls as $url) {
                     $data = $url instanceof SeoUrlEntity ? $url->jsonSerialize() : $url;
-                    if (empty($data['error']) && ! empty($data['seoPathInfo'])) {
+                    if (empty($data['error']) && isset($data['seoPathInfo']) && (string) $data['seoPathInfo'] !== '') {
                         $paths[$data['salesChannelId'] ?? 'all'][] = ltrim((string) $data['seoPathInfo'], '/');
                     }
                 }
