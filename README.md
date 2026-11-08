@@ -93,6 +93,18 @@ After installation, configure the extension:
 - Order Statuses: Enable "In Progress" and "Completed"
 - Delivery Statuses: Enable "Shipped" and "Shipped Partially"
 
+### Product titles and API compatibility
+
+Deploy the Karla backend with legacy null-title compatibility before installing
+this release, together with the variant-archive API described below. Direct
+variant updates load their parent names in a batch. When a parent is missing,
+unnamed or temporarily cannot be read, the plugin sends `title: null` alongside
+a nonblank `variant_title`. The updated API preserves an existing catalog title
+and derives a title for a new record from the variant name or SKU. This prevents
+a temporary parent lookup failure from overwriting a correct product title.
+Older APIs reject that payload with HTTP 422. Run a full product sync after the
+upgrade to repair catalog updates missed by older plugin versions.
+
 ### Product URL synchronization
 
 Run a full product sync after installing the update to populate existing catalog

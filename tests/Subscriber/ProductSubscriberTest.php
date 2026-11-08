@@ -505,7 +505,8 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * Regression: a write touching only variants used to PUT title: null
-     * (rejected with 422) because their parent was never loaded.
+     * because their parent was never loaded, so the loaded parent's real
+     * title was never sent (and older APIs rejected the null with 422).
      *
      * @covers ::processProductWritten
      * @covers ::isSyncConfigured

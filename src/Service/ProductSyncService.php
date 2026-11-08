@@ -567,7 +567,7 @@ class ProductSyncService implements ResetInterface
      * Resolve the parents needed to title variants: the explicitly passed parent
      * plus one batched read for any other parent IDs. The map is local to the
      * call, so a parent never leaks into a later upsert. Never throws - a failed
-     * read degrades to the variant's own name as title.
+     * read degrades to title: null, which preserves the title stored in Karla.
      *
      * @param array<ProductEntity> $products
      * @return array<string, ProductEntity>
@@ -598,7 +598,7 @@ class ProductSyncService implements ResetInterface
                 }
             }
         } catch (\Throwable $t) {
-            $this->logger->warning('Failed to load parent products; titling variants by their own name', [
+            $this->logger->warning('Failed to load parent products; preserving stored product titles', [
                 'component' => 'product.sync',
                 'error' => $t->getMessage(),
             ]);
@@ -946,11 +946,15 @@ class ProductSyncService implements ResetInterface
         // For standalone products: title = product name, variant_title = null
         $variantName = $this->firstNonEmpty($product->getName(), $product->getProductNumber()) ?? 'Unknown Product';
 
-        // Karla rejects a null title: a missing, unloadable or unnamed parent
-        // falls back to the variant's own name. The translated name covers a
-        // parent read in a language it has no own translation for.
+        // A variant whose parent is missing, unloadable or unnamed sends an
+        // explicit title: null. Karla then keeps the title already stored for
+        // the product group and titles a new row from variant_title, so a
+        // degraded sync never overwrites the parent title with a variant name.
+        // The parent SKU is deliberately not used as a fallback for the same
+        // reason. The translated name covers a parent read in a language it
+        // has no own translation for.
         $parentName = $parent
-            ? $this->firstNonEmpty($parent->getTranslation('name'), $parent->getName(), $parent->getProductNumber())
+            ? $this->firstNonEmpty($parent->getTranslation('name'), $parent->getName())
             : null;
 
         // Determine price: try variant price first, then parent price
@@ -965,7 +969,7 @@ class ProductSyncService implements ResetInterface
         $payload = [
             'product_id' => $karlaProductId,
             'variant_id' => $karlaVariantId,
-            'title' => $parentName ?? $variantName,  // Parent name for variants, own name for standalone
+            'title' => $parentId ? $parentName : $variantName,  // Parent name or null (preserve) for variants, own name for standalone
             'variant_title' => $parentId ? $variantName : null,  // Variant name if it's a variant, null otherwise
             'price' => $price,
             'sku' => $product->getProductNumber(),

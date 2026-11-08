@@ -751,8 +751,9 @@ class ProductSyncServiceTest extends TestCase
         self::assertSame('Parent B', $requests[1][2]['title']);
     }
 
-    public function testMissingParentFallsBackToVariantNameOrNumber(): void
+    public function testMissingParentSendsNullTitleWithVariantNameOrNumber(): void
     {
+        // A null title preserves the stored group title; variant_title stays usable
         $nameless = $this->createMock(ProductEntity::class);
         $nameless->method('getId')->willReturn('c-2');
         $nameless->method('getParentId')->willReturn('orphan-2');
@@ -773,19 +774,19 @@ class ProductSyncServiceTest extends TestCase
         ], null, null, false);
 
         self::assertSame([
-            ['PUT', self::PUT . 'orphan-1/variants/c-1', ['title' => 'Red', 'variant_title' => 'Red', 'price' => null, 'sku' => 'SKU-1']],
-            ['PUT', self::PUT . 'orphan-2/variants/c-2', ['title' => 'SKU-2', 'variant_title' => 'SKU-2', 'price' => null, 'sku' => 'SKU-2']],
-            ['PUT', self::PUT . 'orphan-3/variants/c-3', ['title' => 'Unknown Product', 'variant_title' => 'Unknown Product', 'price' => null, 'sku' => '']],
+            ['PUT', self::PUT . 'orphan-1/variants/c-1', ['title' => null, 'variant_title' => 'Red', 'price' => null, 'sku' => 'SKU-1']],
+            ['PUT', self::PUT . 'orphan-2/variants/c-2', ['title' => null, 'variant_title' => 'SKU-2', 'price' => null, 'sku' => 'SKU-2']],
+            ['PUT', self::PUT . 'orphan-3/variants/c-3', ['title' => null, 'variant_title' => 'Unknown Product', 'price' => null, 'sku' => '']],
         ], $requests->getArrayCopy());
     }
 
-    public function testParentLookupFailureStillSendsStringTitle(): void
+    public function testParentLookupFailureSendsNullTitleToPreserveStoredTitle(): void
     {
         $this->stubNoStorefront();
         $this->productRepositoryMock->method('search')->willThrowException(new \RuntimeException('deadlock'));
         $this->loggerMock->expects(self::never())->method('error');
         $this->loggerMock->expects(self::once())->method('warning')->with(
-            'Failed to load parent products; titling variants by their own name',
+            'Failed to load parent products; preserving stored product titles',
             ['component' => 'product.sync', 'error' => 'deadlock']
         );
         $requests = $this->captureRequests();
@@ -793,7 +794,25 @@ class ProductSyncServiceTest extends TestCase
         $this->service->upsertProduct($this->makeVariantProduct('c-1', 'parent-a', 'SKU-1', 'Red'));
 
         self::assertSame([
-            ['PUT', self::PUT . 'parent-a/variants/c-1', ['title' => 'Red', 'variant_title' => 'Red', 'price' => null, 'sku' => 'SKU-1']],
+            ['PUT', self::PUT . 'parent-a/variants/c-1', ['title' => null, 'variant_title' => 'Red', 'price' => null, 'sku' => 'SKU-1']],
+        ], $requests->getArrayCopy());
+    }
+
+    public function testParentWithBlankNameButSkuSendsNullTitle(): void
+    {
+        // The parent SKU is not a group title: null preserves the stored one
+        $parent = $this->createMock(ProductEntity::class);
+        $parent->method('getId')->willReturn('parent-a');
+        $parent->method('getTranslation')->with('name')->willReturn(' ');
+        $parent->method('getName')->willReturn('');
+        $parent->method('getProductNumber')->willReturn('PA');
+        $this->productRepositoryMock->expects(self::never())->method('search');
+        $requests = $this->captureRequests();
+
+        $this->service->upsertProducts([$this->makeVariantProduct('a-1', 'parent-a', 'PA.1', 'Red')], $parent, null, false);
+
+        self::assertSame([
+            ['PUT', self::PUT . 'parent-a/variants/a-1', ['title' => null, 'variant_title' => 'Red', 'price' => null, 'sku' => 'PA.1']],
         ], $requests->getArrayCopy());
     }
 
@@ -814,7 +833,7 @@ class ProductSyncServiceTest extends TestCase
         self::assertSame('Übersetzter Name', $requests[0][2]['title']);
     }
 
-    public function testIndexedOrphanChildIsTitledByItsOwnNumber(): void
+    public function testIndexedOrphanChildSendsNullTitleAndOwnNumberAsVariantTitle(): void
     {
         $results = [[$this->makeVariantProduct('child-id', 'gone-parent', 'CHILD', '')], [], []];
         $this->productRepositoryMock->expects(self::exactly(3))->method('search')
@@ -828,7 +847,7 @@ class ProductSyncServiceTest extends TestCase
 
         self::assertSame([
             ['POST', 'https://api.test.com/v1/shops/test-shop/products', [[
-                'product_id' => 'gone-parent', 'variant_id' => 'child-id', 'title' => 'CHILD', 'variant_title' => 'CHILD', 'price' => null, 'sku' => 'CHILD',
+                'product_id' => 'gone-parent', 'variant_id' => 'child-id', 'title' => null, 'variant_title' => 'CHILD', 'price' => null, 'sku' => 'CHILD',
             ]]],
         ], $requests->getArrayCopy());
     }
@@ -1354,7 +1373,7 @@ class ProductSyncServiceTest extends TestCase
         self::assertFalse($this->service->syncProductBatch(0, 100));
     }
 
-    public function testChildOnlyBatchWithOrphanedChildSendsVariantTitle(): void
+    public function testChildOnlyBatchWithOrphanedChildSendsNullTitleAndVariantTitle(): void
     {
         $child = $this->makeVariantProduct('child', 'gone-parent', 'SKU', 'Child');
         $result = $this->createMock(EntitySearchResult::class);
@@ -1368,7 +1387,7 @@ class ProductSyncServiceTest extends TestCase
 
         self::assertFalse($this->service->syncProductBatch(0, 100));
         self::assertSame([[
-            'product_id' => 'gone-parent', 'variant_id' => 'child', 'title' => 'Child', 'variant_title' => 'Child', 'price' => null, 'sku' => 'SKU',
+            'product_id' => 'gone-parent', 'variant_id' => 'child', 'title' => null, 'variant_title' => 'Child', 'price' => null, 'sku' => 'SKU',
         ]], $requests[0][2]);
     }
 
@@ -1635,7 +1654,7 @@ class ProductSyncServiceTest extends TestCase
         $this->service->upsertProduct($variantProduct, $parentProduct);
     }
 
-    public function testUpsertProductVariantWithParentEmptyNameAndNumber(): void
+    public function testUpsertProductVariantWithParentEmptyNameAndNumberSendsNullTitle(): void
     {
         // Test variant with parent that has empty name and product number
         $parentProduct = $this->createMock(ProductEntity::class);
@@ -1675,8 +1694,9 @@ class ProductSyncServiceTest extends TestCase
                 $this->callback(function ($options) {
                     $body = json_decode($options['body'], true);
 
-                    // Parent has empty name/number, should fallback to the variant's name
-                    $this->assertSame('Blue Variant', $body['title']);
+                    // Parent has empty name/number: explicit null preserves the stored title
+                    $this->assertArrayHasKey('title', $body);
+                    $this->assertNull($body['title']);
                     // Variant should have its own name
                     $this->assertEquals('Blue Variant', $body['variant_title']);
 
