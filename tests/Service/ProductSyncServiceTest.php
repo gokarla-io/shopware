@@ -33,6 +33,8 @@ use Symfony\Contracts\HttpClient\ResponseInterface;
  */
 class ProductSyncServiceTest extends TestCase
 {
+    private const PUT = 'https://api.test.com/v1/shops/test-shop/products/';
+
     /** @var EntityRepository&MockObject */
     private EntityRepository $productRepositoryMock;
 
@@ -637,28 +639,198 @@ class ProductSyncServiceTest extends TestCase
         $this->assertSame('https://shop.example.com/p', $bodies[1]['product_url']);
     }
 
-    public function testResetClearsParentMap(): void
+    public function testPassedParentIsNotReusedByLaterUpserts(): void
     {
         $this->stubNoStorefront();
         $parent = $this->makeStandaloneProduct('parent-id-123', 'PARENT-001', 'Parent Product');
-        $variant = $this->createMock(ProductEntity::class);
-        $variant->method('getProductNumber')->willReturn('SW200-1');
-        $variant->method('getName')->willReturn('Red Variant');
-        $variant->method('getId')->willReturn('variant-id-456');
-        $variant->method('getParentId')->willReturn('parent-id-123');
-        $variant->method('getPrice')->willReturn(null);
-        $variant->method('getCover')->willReturn(null);
-        $variant->method('getTranslations')->willReturn(null);
+        $renamed = $this->makeStandaloneProduct('parent-id-123', 'PARENT-001', 'Renamed Parent');
+        $variant = $this->makeVariantProduct('variant-id-456', 'parent-id-123', 'SW200-1', 'Red Variant');
+        // Only the calls without an explicit parent read it, each one fresh
+        $this->productRepositoryMock->expects(self::exactly(2))->method('search')
+            ->willReturnCallback(fn () => $this->productResult([$renamed]));
         $bodies = $this->captureUpsertBodies();
 
         $this->service->upsertProduct($variant, $parent);
+        $this->service->upsertProduct($variant);
         $this->service->reset();
         $this->service->upsertProduct($variant);
 
-        // Before reset() the parent is remembered (title = parent name); after
-        // it the parent map is empty, so the variant carries no parent title
+        // A parent passed to one call (or loaded by it) must not serve a later
+        // call, in the same worker or after kernel.reset
         $this->assertSame('Parent Product', $bodies[0]['title']);
-        $this->assertNull($bodies[1]['title']);
+        $this->assertSame('Renamed Parent', $bodies[1]['title']);
+        $this->assertSame('Renamed Parent', $bodies[2]['title']);
+    }
+
+    /**
+     * @param array<ProductEntity> $products
+     */
+    private function productResult(array $products): EntitySearchResult
+    {
+        $result = $this->createMock(EntitySearchResult::class);
+        $result->method('getIterator')->willReturn(new \ArrayIterator($products));
+
+        return $result;
+    }
+
+    /**
+     * Stub config + HTTP and collect [method, url, body] for every request.
+     *
+     * @return \ArrayObject<int, array{0: string, 1: string, 2: mixed}>
+     */
+    private function captureRequests(): \ArrayObject
+    {
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.shopSlug', null, 'test-shop'],
+            ['KarlaDelivery.config.apiUrl', null, 'https://api.test.com'],
+            ['KarlaDelivery.config.debugMode', null, false],
+            ['KarlaDelivery.config.apiUsername', null, 'user'],
+            ['KarlaDelivery.config.apiKey', null, 'key'],
+            ['KarlaDelivery.config.requestTimeout', null, 10.0],
+        ]);
+        /** @var \ArrayObject<int, array{0: string, 1: string, 2: mixed}> $requests */
+        $requests = new \ArrayObject();
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn(200);
+        $this->httpClientMock->method('request')->willReturnCallback(
+            function (string $method, string $url, array $options) use ($requests, $response): ResponseInterface {
+                $requests[] = [$method, $url, json_decode((string) $options['body'], true)];
+
+                return $response;
+            }
+        );
+
+        return $requests;
+    }
+
+    public function testChildOnlyUpsertsLoadAllParentsInOneQuery(): void
+    {
+        $this->productRepositoryMock->expects(self::once())->method('search')
+            ->willReturnCallback(function (Criteria $criteria, $context) {
+                self::assertSame(['parent-a', 'parent-b'], $criteria->getIds());
+                self::assertTrue($criteria->hasAssociation('cover'));
+                self::assertTrue($context->considerInheritance());
+
+                return $this->productResult([
+                    $this->makeStandaloneProduct('parent-a', 'PA', 'Parent A'),
+                    $this->makeStandaloneProduct('parent-b', 'PB', 'Parent B'),
+                ]);
+            });
+        $requests = $this->captureRequests();
+
+        $this->service->upsertProducts([
+            $this->makeVariantProduct('a-1', 'parent-a', 'PA.1', 'Red'),
+            $this->makeVariantProduct('a-2', 'parent-a', 'PA.2', 'Blue'),
+            $this->makeVariantProduct('b-1', 'parent-b', 'PB.1', 'Large'),
+        ], null, null, false);
+
+        self::assertSame([
+            ['PUT', self::PUT . 'parent-a/variants/a-1', ['title' => 'Parent A', 'variant_title' => 'Red', 'price' => null, 'sku' => 'PA.1']],
+            ['PUT', self::PUT . 'parent-a/variants/a-2', ['title' => 'Parent A', 'variant_title' => 'Blue', 'price' => null, 'sku' => 'PA.2']],
+            ['PUT', self::PUT . 'parent-b/variants/b-1', ['title' => 'Parent B', 'variant_title' => 'Large', 'price' => null, 'sku' => 'PB.1']],
+        ], $requests->getArrayCopy());
+    }
+
+    public function testPassedParentIsUsedOnlyForItsOwnChildren(): void
+    {
+        // Only the parent that was not passed is read
+        $this->productRepositoryMock->expects(self::once())->method('search')
+            ->willReturnCallback(function (Criteria $criteria) {
+                self::assertSame(['parent-b'], $criteria->getIds());
+
+                return $this->productResult([$this->makeStandaloneProduct('parent-b', 'PB', 'Parent B')]);
+            });
+        $requests = $this->captureRequests();
+
+        $this->service->upsertProducts([
+            $this->makeVariantProduct('a-1', 'parent-a', 'PA.1', 'Red'),
+            $this->makeVariantProduct('b-1', 'parent-b', 'PB.1', 'Large'),
+        ], $this->makeStandaloneProduct('parent-a', 'PA', 'Parent A'), null, false);
+
+        self::assertSame('Parent A', $requests[0][2]['title']);
+        self::assertSame('Parent B', $requests[1][2]['title']);
+    }
+
+    public function testMissingParentFallsBackToVariantNameOrNumber(): void
+    {
+        $nameless = $this->createMock(ProductEntity::class);
+        $nameless->method('getId')->willReturn('c-2');
+        $nameless->method('getParentId')->willReturn('orphan-2');
+        $nameless->method('getProductNumber')->willReturn('SKU-2');
+        $nameless->method('getName')->willReturn(null);
+        $anonymous = $this->createMock(ProductEntity::class);
+        $anonymous->method('getId')->willReturn('c-3');
+        $anonymous->method('getParentId')->willReturn('orphan-3');
+        $anonymous->method('getProductNumber')->willReturn('');
+        $anonymous->method('getName')->willReturn('  ');
+        $this->productRepositoryMock->expects(self::once())->method('search')->willReturn($this->productResult([]));
+        $requests = $this->captureRequests();
+
+        $this->service->upsertProducts([
+            $this->makeVariantProduct('c-1', 'orphan-1', 'SKU-1', 'Red'),
+            $nameless,
+            $anonymous,
+        ], null, null, false);
+
+        self::assertSame([
+            ['PUT', self::PUT . 'orphan-1/variants/c-1', ['title' => 'Red', 'variant_title' => 'Red', 'price' => null, 'sku' => 'SKU-1']],
+            ['PUT', self::PUT . 'orphan-2/variants/c-2', ['title' => 'SKU-2', 'variant_title' => 'SKU-2', 'price' => null, 'sku' => 'SKU-2']],
+            ['PUT', self::PUT . 'orphan-3/variants/c-3', ['title' => 'Unknown Product', 'variant_title' => 'Unknown Product', 'price' => null, 'sku' => '']],
+        ], $requests->getArrayCopy());
+    }
+
+    public function testParentLookupFailureStillSendsStringTitle(): void
+    {
+        $this->stubNoStorefront();
+        $this->productRepositoryMock->method('search')->willThrowException(new \RuntimeException('deadlock'));
+        $this->loggerMock->expects(self::never())->method('error');
+        $this->loggerMock->expects(self::once())->method('warning')->with(
+            'Failed to load parent products; titling variants by their own name',
+            ['component' => 'product.sync', 'error' => 'deadlock']
+        );
+        $requests = $this->captureRequests();
+
+        $this->service->upsertProduct($this->makeVariantProduct('c-1', 'parent-a', 'SKU-1', 'Red'));
+
+        self::assertSame([
+            ['PUT', self::PUT . 'parent-a/variants/c-1', ['title' => 'Red', 'variant_title' => 'Red', 'price' => null, 'sku' => 'SKU-1']],
+        ], $requests->getArrayCopy());
+    }
+
+    public function testParentTranslatedNameIsPreferred(): void
+    {
+        // Parent read in a language without its own translation: the raw name
+        // is null, the translated (fallback-resolved) name is not
+        $parent = $this->createMock(ProductEntity::class);
+        $parent->method('getId')->willReturn('parent-a');
+        $parent->method('getTranslation')->with('name')->willReturn('Übersetzter Name');
+        $parent->method('getName')->willReturn(null);
+        $parent->method('getProductNumber')->willReturn('PA');
+        $this->productRepositoryMock->expects(self::never())->method('search');
+        $requests = $this->captureRequests();
+
+        $this->service->upsertProducts([$this->makeVariantProduct('a-1', 'parent-a', 'PA.1', 'Red')], $parent, null, false);
+
+        self::assertSame('Übersetzter Name', $requests[0][2]['title']);
+    }
+
+    public function testIndexedOrphanChildIsTitledByItsOwnNumber(): void
+    {
+        $results = [[$this->makeVariantProduct('child-id', 'gone-parent', 'CHILD', '')], [], []];
+        $this->productRepositoryMock->expects(self::exactly(3))->method('search')
+            ->willReturnCallback(function () use (&$results) {
+                return $this->productResult(array_shift($results));
+            });
+        $this->stubNoStorefront();
+        $requests = $this->captureRequests();
+
+        $this->service->syncIndexedProductIds(['child-id'], null);
+
+        self::assertSame([
+            ['POST', 'https://api.test.com/v1/shops/test-shop/products', [[
+                'product_id' => 'gone-parent', 'variant_id' => 'child-id', 'title' => 'CHILD', 'variant_title' => 'CHILD', 'price' => null, 'sku' => 'CHILD',
+            ]]],
+        ], $requests->getArrayCopy());
     }
 
     public function testUpsertProductUrlOmittedWhenNoProductIds(): void
@@ -1182,6 +1354,24 @@ class ProductSyncServiceTest extends TestCase
         self::assertFalse($this->service->syncProductBatch(0, 100));
     }
 
+    public function testChildOnlyBatchWithOrphanedChildSendsVariantTitle(): void
+    {
+        $child = $this->makeVariantProduct('child', 'gone-parent', 'SKU', 'Child');
+        $result = $this->createMock(EntitySearchResult::class);
+        $result->method('count')->willReturn(1);
+        $result->method('getTotal')->willReturn(1);
+        $result->method('getElements')->willReturn([$child]);
+        $this->productRepositoryMock->expects(self::exactly(2))->method('search')
+            ->willReturnOnConsecutiveCalls($result, $this->productResult([]));
+        $this->stubNoStorefront();
+        $requests = $this->captureRequests();
+
+        self::assertFalse($this->service->syncProductBatch(0, 100));
+        self::assertSame([[
+            'product_id' => 'gone-parent', 'variant_id' => 'child', 'title' => 'Child', 'variant_title' => 'Child', 'price' => null, 'sku' => 'SKU',
+        ]], $requests[0][2]);
+    }
+
     public function testSyncProductBatchNoMoreProducts(): void
     {
         $productCollection = new ProductCollection([]);
@@ -1365,7 +1555,8 @@ class ProductSyncServiceTest extends TestCase
             )
             ->willReturn($response);
 
-        // Pass parent entity explicitly
+        // Pass parent entity explicitly: it must not be read again
+        $this->productRepositoryMock->expects($this->never())->method('search');
         $this->service->upsertProduct($product, $parentProduct);
     }
 
@@ -1484,8 +1675,8 @@ class ProductSyncServiceTest extends TestCase
                 $this->callback(function ($options) {
                     $body = json_decode($options['body'], true);
 
-                    // Parent has empty name/number, should fallback to 'Unknown Product'
-                    $this->assertEquals('Unknown Product', $body['title']);
+                    // Parent has empty name/number, should fallback to the variant's name
+                    $this->assertSame('Blue Variant', $body['title']);
                     // Variant should have its own name
                     $this->assertEquals('Blue Variant', $body['variant_title']);
 

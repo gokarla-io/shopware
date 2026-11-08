@@ -523,7 +523,7 @@ class ProductSyncService implements ResetInterface
             $urlMap = null;
         }
 
-        $this->upsertProductWithUrlMap($product, $parent, $urlMap, $salesChannelId);
+        $this->upsertProductWithUrlMap($product, $this->loadParents([$product], $parent), $urlMap, $salesChannelId);
     }
 
     /**
@@ -557,18 +557,64 @@ class ProductSyncService implements ResetInterface
             $urlMap = null;
         }
 
+        $parents = $this->loadParents($products, $parent);
         foreach ($products as $product) {
-            $this->upsertProductWithUrlMap($product, $parent, $urlMap, $salesChannelId);
+            $this->upsertProductWithUrlMap($product, $parents, $urlMap, $salesChannelId);
         }
     }
 
     /**
+     * Resolve the parents needed to title variants: the explicitly passed parent
+     * plus one batched read for any other parent IDs. The map is local to the
+     * call, so a parent never leaks into a later upsert. Never throws - a failed
+     * read degrades to the variant's own name as title.
+     *
+     * @param array<ProductEntity> $products
+     * @return array<string, ProductEntity>
+     */
+    private function loadParents(array $products, ?ProductEntity $parent): array
+    {
+        $parents = [];
+
+        try {
+            if ($parent !== null) {
+                $parents[$parent->getId()] = $parent;
+            }
+            $missingParents = [];
+            foreach ($products as $product) {
+                $parentId = $product->getParentId();
+                if ($parentId && ! isset($parents[$parentId])) {
+                    $missingParents[$parentId] = $parentId;
+                }
+            }
+            if ($missingParents !== []) {
+                $context = Context::createDefaultContext();
+                $context->setConsiderInheritance(true);
+                $parentCriteria = new Criteria(array_values($missingParents));
+                $parentCriteria->addAssociations(['cover.media']);
+                /** @var ProductEntity $loaded */
+                foreach ($this->productRepository->search($parentCriteria, $context) as $loaded) {
+                    $parents[$loaded->getId()] = $loaded;
+                }
+            }
+        } catch (\Throwable $t) {
+            $this->logger->warning('Failed to load parent products; titling variants by their own name', [
+                'component' => 'product.sync',
+                'error' => $t->getMessage(),
+            ]);
+        }
+
+        return $parents;
+    }
+
+    /**
+     * @param array<string, ProductEntity> $parents Parents for this call, keyed by ID
      * @param array<string, string>|null $urlMap Resolved URL map, or null when
      *        resolution was unavailable (product_url omitted from the payload)
      */
     private function upsertProductWithUrlMap(
         ProductEntity $product,
-        ?ProductEntity $parent,
+        array $parents,
         ?array $urlMap,
         ?string $salesChannelId
     ): void {
@@ -582,13 +628,8 @@ class ProductSyncService implements ResetInterface
                 throw new \RuntimeException('Missing required config (shopSlug or apiUrl)');
             }
 
-            // If a parent was provided, store it in the map for buildVariantPayload to use
-            if ($parent !== null) {
-                $this->parentMap[$parent->getId()] = $parent;
-            }
-
             // Build variant payload
-            $variantPayload = $this->buildVariantPayload($product, $urlMap);
+            $variantPayload = $this->buildVariantPayload($product, $urlMap, $parents);
 
             $karlaProductId = $variantPayload['product_id'];
             $karlaVariantId = $variantPayload['variant_id'];
@@ -659,7 +700,7 @@ class ProductSyncService implements ResetInterface
         // buildVariantPayload() is fully defensive and cannot throw
         $variantPayloads = [];
         foreach ($products as $product) {
-            $variantPayloads[] = $this->buildVariantPayload($product, $urlMap);
+            $variantPayloads[] = $this->buildVariantPayload($product, $urlMap, $this->parentMap);
         }
 
         if ($debugMode) {
@@ -886,8 +927,9 @@ class ProductSyncService implements ResetInterface
      *
      * @param array<string, string>|null $urlMap Resolved product URLs, or null
      *        when resolution was unavailable (product_url omitted entirely)
+     * @param array<string, ProductEntity> $parents Loaded parents, keyed by ID
      */
-    private function buildVariantPayload(ProductEntity $product, ?array $urlMap): array
+    private function buildVariantPayload(ProductEntity $product, ?array $urlMap, array $parents): array
     {
         // Determine product_id and variant_id
         // For Shopware: parent ID is the container, product ID is the variant
@@ -898,22 +940,18 @@ class ProductSyncService implements ResetInterface
         $karlaVariantId = $productId;  // The actual variant/product ID
 
         // Get parent product if this is a variant (from our pre-loaded map)
-        $parent = $parentId && isset($this->parentMap[$parentId]) ? $this->parentMap[$parentId] : null;
+        $parent = $parentId && isset($parents[$parentId]) ? $parents[$parentId] : null;
 
         // For variants: title = parent name, variant_title = variant name
         // For standalone products: title = product name, variant_title = null
-        $variantName = $product->getName();
-        if (empty($variantName)) {
-            $variantName = $product->getProductNumber() ?: 'Unknown Product';
-        }
+        $variantName = $this->firstNonEmpty($product->getName(), $product->getProductNumber()) ?? 'Unknown Product';
 
-        $parentName = null;
-        if ($parent) {
-            $parentName = $parent->getName();
-            if (empty($parentName)) {
-                $parentName = $parent->getProductNumber() ?: 'Unknown Product';
-            }
-        }
+        // Karla rejects a null title: a missing, unloadable or unnamed parent
+        // falls back to the variant's own name. The translated name covers a
+        // parent read in a language it has no own translation for.
+        $parentName = $parent
+            ? $this->firstNonEmpty($parent->getTranslation('name'), $parent->getName(), $parent->getProductNumber())
+            : null;
 
         // Determine price: try variant price first, then parent price
         $price = null;
@@ -927,7 +965,7 @@ class ProductSyncService implements ResetInterface
         $payload = [
             'product_id' => $karlaProductId,
             'variant_id' => $karlaVariantId,
-            'title' => $parentId ? $parentName : $variantName,  // Parent name for variants, own name for standalone
+            'title' => $parentName ?? $variantName,  // Parent name for variants, own name for standalone
             'variant_title' => $parentId ? $variantName : null,  // Variant name if it's a variant, null otherwise
             'price' => $price,
             'sku' => $product->getProductNumber(),
@@ -961,6 +999,17 @@ class ProductSyncService implements ResetInterface
         }
 
         return $payload;
+    }
+
+    private function firstNonEmpty(mixed ...$candidates): ?string
+    {
+        foreach ($candidates as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '') {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     /**
