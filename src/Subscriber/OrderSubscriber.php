@@ -860,6 +860,11 @@ class OrderSubscriber implements EventSubscriberInterface
                     && ($parent = $lineItems->get($parentId)) instanceof OrderLineItemEntity) {
                     $root = $path[$parentId] = $parent;
                 }
+                if ($parentId !== null && isset($path[$parentId])) {
+                    // Malformed parent cycle: treat the item as its own root so the result is deterministic.
+                    $root = $lineItem;
+                    $path = [$lineItem->getId() => $lineItem];
+                }
                 // Map every visited item (incl. intermediate bundles) so any delivery position resolves.
                 foreach ($path as $visitedId => $_) {
                     $rootIdByLineItemId[$visitedId] = $root->getId();
@@ -942,6 +947,9 @@ class OrderSubscriber implements EventSubscriberInterface
             && $productItems !== []
             && (count($productItems) === 1 || $lineItem->getReferencedId() === null)
         ) {
+            // Pick the first item by position (then ID) so the identity is stable across re-syncs.
+            usort($productItems, static fn (OrderLineItemEntity $x, OrderLineItemEntity $y): int
+                => [$x->getPosition(), $x->getId()] <=> [$y->getPosition(), $y->getId()]);
             $identity = $productItems[0];
         }
 

@@ -67,6 +67,7 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
         $item->setType($type);
         $item->setLabel($label);
         $item->setQuantity($quantity);
+        $item->setPosition(1);
         $item->setUnitPrice($unitPrice);
         $item->setTotalPrice($unitPrice * $quantity);
         if ($parentId !== null) {
@@ -244,8 +245,10 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
 
         $result = $this->call('readLineItems', new OrderLineItemCollection([$a, $b]));
 
-        // Terminates, and each item is still sent exactly once.
+        // Terminates, and each item in the cycle is its own root, counted exactly once.
         $this->assertEqualsCanonicalizing(['A', 'B'], array_column($result['products'], 'sku'));
+        $this->assertSame([$a->getId() => $a->getId(), $b->getId() => $b->getId()], $result['rootIdByLineItemId']);
+        $this->assertEqualsWithDelta(3.0, $result['subTotalPrice'], 0.0001);
     }
 
     public function testMultiPartBundleWithoutReferencedIdBorrowsFirstPartIdentity(): void
@@ -262,5 +265,19 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
         $this->assertSame(20.0, $result['products'][0]['price']);
         $this->assertSame('PART-A', $result['products'][0]['sku']);
         $this->assertSame($partA->getReferencedId(), $result['products'][0]['variant_id']);
+    }
+
+    public function testMultiPartBundleIdentityFollowsPositionNotCollectionOrder(): void
+    {
+        $bundle = $this->lineItem('bill-of-materials', 'Multi-Part Set', 20.0);
+        $bundle->setReferencedId(null);
+        $partA = $this->lineItem('product', 'Part A', 0.0, $bundle->getId(), $this->product('PART-A'));
+        $partA->setPosition(1);
+        $partB = $this->lineItem('product', 'Part B', 0.0, $bundle->getId(), $this->product('PART-B'));
+        $partB->setPosition(2);
+
+        $result = $this->call('readLineItems', new OrderLineItemCollection([$bundle, $partB, $partA]));
+
+        $this->assertSame('PART-A', $result['products'][0]['sku']);
     }
 }
