@@ -852,13 +852,18 @@ class OrderSubscriber implements EventSubscriberInterface
                 'type' => is_array($payload) ? $payload['discountType'] : null,
                 ];
             } elseif ($this->isProductType($lineItem)) {
+                // Walk up to the root; the visited guard stops on a malformed parent cycle.
+                $path = [$lineItem->getId() => $lineItem];
                 $root = $lineItem;
                 while (($parentId = $root->getParentId()) !== null
+                    && ! isset($path[$parentId])
                     && ($parent = $lineItems->get($parentId)) instanceof OrderLineItemEntity) {
-                    $root = $parent;
+                    $root = $path[$parentId] = $parent;
                 }
-                $rootIdByLineItemId[$lineItem->getId()] = $root->getId();
-                $rootIdByLineItemId[$root->getId()] = $root->getId();
+                // Map every visited item (incl. intermediate bundles) so any delivery position resolves.
+                foreach ($path as $visitedId => $_) {
+                    $rootIdByLineItemId[$visitedId] = $root->getId();
+                }
                 $rootsById[$root->getId()] = $root;
                 $productItemsByRootId[$root->getId()][] = $lineItem;
             }
@@ -922,15 +927,21 @@ class OrderSubscriber implements EventSubscriberInterface
     /**
      * Build the Karla product payload for a root line item. Label, quantity and
      * price come from the root; when the root has no product of its own (a bundle
-     * container), the product identity and image come from its single product item.
+     * container), the product identity and image come from its product item (see below).
      *
      * @param list<OrderLineItemEntity> $productItems product/deposit line items under this root
      * @return array<string, mixed>
      */
     private function buildProductPayload(OrderLineItemEntity $lineItem, array $productItems): array
     {
+        // A container without its own product borrows identity from a product item: always
+        // when it has exactly one, and from the first one when it has no referenced ID either.
         $identity = $lineItem;
-        if (! $lineItem->getProduct() instanceof ProductEntity && count($productItems) === 1) {
+        if (
+            ! $lineItem->getProduct() instanceof ProductEntity
+            && $productItems !== []
+            && (count($productItems) === 1 || $lineItem->getReferencedId() === null)
+        ) {
             $identity = $productItems[0];
         }
 

@@ -219,4 +219,48 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
 
         $this->assertSame('PAYLOAD-SKU', $result['products'][0]['sku']);
     }
+
+    public function testDeliveryPositionOnIntermediateBundleResolvesToRoot(): void
+    {
+        $outer = $this->lineItem('bill-of-materials', 'Outer Set', 30.0);
+        $inner = $this->lineItem('bill-of-materials', 'Inner Set', 0.0, $outer->getId());
+        $part = $this->lineItem('product', 'Part', 0.0, $inner->getId(), $this->product('PART-1'));
+        $lineItems = new OrderLineItemCollection([$outer, $inner, $part]);
+        $positions = new OrderDeliveryPositionCollection([$this->position($inner)]);
+
+        $order = $this->call('readLineItems', $lineItems);
+        $shipment = $this->call('readDeliveryPositions', $positions, $order);
+
+        $this->assertCount(1, $order['products']);
+        $this->assertSame('Outer Set', $order['products'][0]['title']);
+        $this->assertSame($order['products'], $shipment);
+    }
+
+    public function testParentCycleDoesNotLoopForever(): void
+    {
+        $a = $this->lineItem('product', 'A', 1.0, null, $this->product('A'));
+        $b = $this->lineItem('product', 'B', 2.0, $a->getId(), $this->product('B'));
+        $a->setParentId($b->getId());
+
+        $result = $this->call('readLineItems', new OrderLineItemCollection([$a, $b]));
+
+        // Terminates, and each item is still sent exactly once.
+        $this->assertEqualsCanonicalizing(['A', 'B'], array_column($result['products'], 'sku'));
+    }
+
+    public function testMultiPartBundleWithoutReferencedIdBorrowsFirstPartIdentity(): void
+    {
+        $bundle = $this->lineItem('bill-of-materials', 'Multi-Part Set', 20.0);
+        $bundle->setReferencedId(null);
+        $partA = $this->lineItem('product', 'Part A', 0.0, $bundle->getId(), $this->product('PART-A'));
+        $partB = $this->lineItem('product', 'Part B', 0.0, $bundle->getId(), $this->product('PART-B'));
+
+        $result = $this->call('readLineItems', new OrderLineItemCollection([$bundle, $partA, $partB]));
+
+        $this->assertCount(1, $result['products']);
+        $this->assertSame('Multi-Part Set', $result['products'][0]['title']);
+        $this->assertSame(20.0, $result['products'][0]['price']);
+        $this->assertSame('PART-A', $result['products'][0]['sku']);
+        $this->assertSame($partA->getReferencedId(), $result['products'][0]['variant_id']);
+    }
 }
