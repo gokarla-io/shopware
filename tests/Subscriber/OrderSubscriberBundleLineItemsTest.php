@@ -95,7 +95,7 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
      */
     private function bundleOrderLineItems(): array
     {
-        $salami = $this->lineItem('product', 'Single Product', 9.99, null, $this->product('SINGLE-1'));
+        $single = $this->lineItem('product', 'Single Product', 9.99, null, $this->product('SINGLE-1'));
         $bundle = $this->lineItem('bill-of-materials', 'Bundle Product', 6.89);
         $stock = $this->lineItem(
             'product',
@@ -105,7 +105,7 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
             $this->product('BUNDLE-STOCK'),
         );
 
-        return [new OrderLineItemCollection([$salami, $bundle, $stock]), $salami, $bundle, $stock];
+        return [new OrderLineItemCollection([$single, $bundle, $stock]), $single, $bundle, $stock];
     }
 
     /**
@@ -145,11 +145,11 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
 
     public function testDeliveryPositionOnBundleParentMatchesOrderProducts(): void
     {
-        [$lineItems, $salami, $bundle] = $this->bundleOrderLineItems();
-        $positions = new OrderDeliveryPositionCollection([$this->position($salami), $this->position($bundle)]);
+        [$lineItems, $single, $bundle] = $this->bundleOrderLineItems();
+        $positions = new OrderDeliveryPositionCollection([$this->position($single), $this->position($bundle)]);
 
         $order = $this->call('readLineItems', $lineItems);
-        $shipment = $this->call('readDeliveryPositions', $positions, $lineItems);
+        $shipment = $this->call('readDeliveryPositions', $positions, $order);
 
         $this->assertSame(
             array_column($order['products'], 'variant_id'),
@@ -160,13 +160,13 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
     public function testDeliveryPositionsOnBundleChildrenAreMappedToParentOnce(): void
     {
         $bundle = $this->lineItem('bill-of-materials', 'Multi-Part Set', 20.0);
-        $flour = $this->lineItem('product', 'Part A', 0.0, $bundle->getId(), $this->product('PART-A'));
-        $tomatoes = $this->lineItem('product', 'Part B', 0.0, $bundle->getId(), $this->product('PART-B'));
-        $lineItems = new OrderLineItemCollection([$bundle, $flour, $tomatoes]);
-        $positions = new OrderDeliveryPositionCollection([$this->position($flour), $this->position($tomatoes)]);
+        $partA = $this->lineItem('product', 'Part A', 0.0, $bundle->getId(), $this->product('PART-A'));
+        $partB = $this->lineItem('product', 'Part B', 0.0, $bundle->getId(), $this->product('PART-B'));
+        $lineItems = new OrderLineItemCollection([$bundle, $partA, $partB]);
+        $positions = new OrderDeliveryPositionCollection([$this->position($partA), $this->position($partB)]);
 
         $order = $this->call('readLineItems', $lineItems);
-        $shipment = $this->call('readDeliveryPositions', $positions, $lineItems);
+        $shipment = $this->call('readDeliveryPositions', $positions, $order);
 
         $this->assertCount(1, $order['products']);
         $this->assertSame('Multi-Part Set', $order['products'][0]['title']);

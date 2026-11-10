@@ -104,6 +104,13 @@ class OrderSubscriber implements EventSubscriberInterface
     private string $depositLineItemType;
 
     /**
+     * Line item types sent to Karla as products: `product` plus the configured deposit type.
+     *
+     * @var list<string>
+     */
+    private array $productLineItemTypes;
+
+    /**
      * @var array
      */
     private array $salesChannelMapping;
@@ -220,6 +227,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $this->depositLineItemType = $systemConfigService->get(
             'KarlaDelivery.config.depositLineItemType'
         );
+        $this->productLineItemTypes = array_values(array_filter(['product', $this->depositLineItemType]));
 
         // Sales Channel Mapping Configuration
         $salesChannelMappingConfig = $systemConfigService->get(
@@ -640,10 +648,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 continue;
             }
 
-            $deliveryProducts = $this->readDeliveryPositions(
-                $delivery->getPositions(),
-                $order->getLineItems()
-            );
+            $deliveryProducts = $this->readDeliveryPositions($delivery->getPositions(), $lineItemDetails);
             if ($this->debugMode) {
                 $this->logger->debug('Delivery included in tracking sync', [
                     ...$deliveryLogContext,
@@ -828,22 +833,20 @@ class OrderSubscriber implements EventSubscriberInterface
     /**
      * Parse order line items
      *
-     * Only root line items are emitted. A root counts as a product when its type is
-     * product/deposit, or when it has product children: bundle plugins (e.g. a
+     * Products are emitted per root line item: every product/deposit line item is
+     * walked up to its root, and each root is sent once. Bundle plugins (e.g. a
      * "Stückliste") put the price on a parent of a custom type and add €0.00
      * product children for stock, so the parent is what the customer bought.
-     * Children of an emitted root are never sent on their own.
      *
      * @param OrderLineItemCollection $lineItems
      * @return array
      */
     private function readLineItems(OrderLineItemCollection $lineItems)
     {
-        $products = [];
         $discounts = [];
-        $subTotalPrice = 0.0;
         $discountPrice = 0.0;
-        $childrenByParent = $this->indexChildLineItems($lineItems);
+        $rootIdByLineItemId = [];
+        $productItemsByRootId = [];
 
         foreach ($lineItems as $lineItem) {
             $payload = $lineItem->getPayload();
@@ -854,22 +857,31 @@ class OrderSubscriber implements EventSubscriberInterface
                 'amount' => $lineItem->getTotalPrice(),
                 'type' => is_array($payload) ? $payload['discountType'] : null,
                 ];
+            } elseif ($this->isProductType($lineItem)) {
+                $root = $lineItem;
+                while (($parentId = $root->getParentId()) !== null
+                    && ($parent = $lineItems->get($parentId)) instanceof OrderLineItemEntity) {
+                    $root = $parent;
+                }
+                $rootIdByLineItemId[$lineItem->getId()] = $root->getId();
+                $rootIdByLineItemId[$root->getId()] = $root->getId();
+                $productItemsByRootId[$root->getId()][] = $lineItem;
+            }
+        }
 
-                continue;
-            }
-            if (! $this->isRootLineItem($lineItem, $lineItems)) {
-                continue;
-            }
-            $children = $childrenByParent[$lineItem->getId()] ?? [];
-            if (! $this->isProductLineItem($lineItem, $children)) {
-                continue;
-            }
-            $subTotalPrice += $lineItem->getTotalPrice();
-            $products[] = $this->buildProductPayload($lineItem, $children);
+        $products = [];
+        $productsByRootId = [];
+        $subTotalPrice = 0.0;
+        foreach ($productItemsByRootId as $rootId => $productItems) {
+            $root = $lineItems->get($rootId) ?? $productItems[0];
+            $subTotalPrice += $root->getTotalPrice();
+            $products[] = $productsByRootId[$rootId] = $this->buildProductPayload($root, $productItems);
         }
 
         return [
         'products' => $products,
+        'productsByRootId' => $productsByRootId,
+        'rootIdByLineItemId' => $rootIdByLineItemId,
         'discounts' => $discounts,
         'subTotalPrice' => $subTotalPrice,
         'discountPrice' => $discountPrice,
@@ -879,128 +891,53 @@ class OrderSubscriber implements EventSubscriberInterface
     /**
      * Parse products from a delivery position
      *
-     * Each position is mapped to its root line item (see readLineItems), so a
-     * shipment carries the same products as the order even when the position
+     * Each position reuses the product of its root line item from readLineItems,
+     * so a shipment carries the same products as the order even when the position
      * points at a bundle parent of a custom type or at one of its children.
      *
      * @param OrderDeliveryPositionCollection $deliveryPositions
-     * @param OrderLineItemCollection|null $orderLineItems all line items of the order
+     * @param array $lineItemDetails result of readLineItems for the same order
      * @return array
      */
-    private function readDeliveryPositions(
-        OrderDeliveryPositionCollection $deliveryPositions,
-        ?OrderLineItemCollection $orderLineItems = null
-    ) {
+    private function readDeliveryPositions(OrderDeliveryPositionCollection $deliveryPositions, array $lineItemDetails)
+    {
         $products = [];
-        $emittedRootIds = [];
-        $orderLineItems ??= new OrderLineItemCollection();
-        $childrenByParent = $this->indexChildLineItems($orderLineItems);
 
         foreach ($deliveryPositions as $deliveryPosition) {
             $lineItem = $deliveryPosition->getOrderLineItem();
             if ($lineItem === null) {
                 continue;
             }
-            $root = $this->resolveRootLineItem($lineItem, $orderLineItems);
-            if (isset($emittedRootIds[$root->getId()])) {
-                continue;
+            $rootId = $lineItemDetails['rootIdByLineItemId'][$lineItem->getId()] ?? null;
+            if ($rootId !== null) {
+                $products[$rootId] = $lineItemDetails['productsByRootId'][$rootId];
+            } elseif ($this->isProductType($lineItem)) {
+                // Line item not part of the loaded order line items: send it as is.
+                $products[$lineItem->getId()] = $this->buildProductPayload($lineItem, [$lineItem]);
             }
-            $children = $childrenByParent[$root->getId()] ?? [];
-            if (! $this->isProductLineItem($root, $children)) {
-                continue;
-            }
-            $emittedRootIds[$root->getId()] = true;
-            $products[] = $this->buildProductPayload($root, $children);
         }
 
-        return $products;
+        return array_values($products);
     }
 
-    /**
-     * @return array<string, list<OrderLineItemEntity>> child line items keyed by parent line item id
-     */
-    private function indexChildLineItems(OrderLineItemCollection $lineItems): array
+    private function isProductType(OrderLineItemEntity $lineItem): bool
     {
-        $childrenByParent = [];
-        foreach ($lineItems as $lineItem) {
-            $parentId = $lineItem->getParentId();
-            if ($parentId !== null) {
-                $childrenByParent[$parentId][] = $lineItem;
-            }
-        }
-
-        return $childrenByParent;
-    }
-
-    private function isRootLineItem(OrderLineItemEntity $lineItem, OrderLineItemCollection $lineItems): bool
-    {
-        $parentId = $lineItem->getParentId();
-
-        return $parentId === null || $lineItems->get($parentId) === null;
-    }
-
-    private function resolveRootLineItem(
-        OrderLineItemEntity $lineItem,
-        OrderLineItemCollection $lineItems
-    ): OrderLineItemEntity {
-        $current = $lineItems->get($lineItem->getId()) ?? $lineItem;
-        $seen = [];
-        while (($parentId = $current->getParentId()) !== null && ! isset($seen[$parentId])) {
-            $seen[$parentId] = true;
-            $parent = $lineItems->get($parentId);
-            if (! $parent instanceof OrderLineItemEntity) {
-                break;
-            }
-            $current = $parent;
-        }
-
-        return $current;
-    }
-
-    /**
-     * @param list<OrderLineItemEntity> $children
-     */
-    private function isProductLineItem(OrderLineItemEntity $lineItem, array $children): bool
-    {
-        if (in_array($lineItem->getType(), $this->productLineItemTypes(), true)) {
-            return true;
-        }
-        foreach ($children as $child) {
-            if (in_array($child->getType(), $this->productLineItemTypes(), true)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * @return list<string>
-     */
-    private function productLineItemTypes(): array
-    {
-        return array_values(array_filter(['product', $this->depositLineItemType]));
+        return in_array($lineItem->getType(), $this->productLineItemTypes, true);
     }
 
     /**
      * Build the Karla product payload for a root line item. Label, quantity and
      * price come from the root; when the root has no product of its own (a bundle
-     * container), the product identity and image come from its single product child.
+     * container), the product identity and image come from its single product item.
      *
-     * @param list<OrderLineItemEntity> $children
+     * @param list<OrderLineItemEntity> $productItems product/deposit line items under this root
      * @return array<string, mixed>
      */
-    private function buildProductPayload(OrderLineItemEntity $lineItem, array $children): array
+    private function buildProductPayload(OrderLineItemEntity $lineItem, array $productItems): array
     {
         $identity = $lineItem;
-        if (! $lineItem->getProduct() instanceof ProductEntity) {
-            $productChildren = array_values(array_filter(
-                $children,
-                fn (OrderLineItemEntity $child) => $child->getType() === 'product'
-            ));
-            if (count($productChildren) === 1) {
-                $identity = $productChildren[0];
-            }
+        if (! $lineItem->getProduct() instanceof ProductEntity && count($productItems) === 1) {
+            $identity = $productItems[0];
         }
 
         $payload = $identity->getPayload();
@@ -1037,6 +974,7 @@ class OrderSubscriber implements EventSubscriberInterface
          ]] : [],
         ];
     }
+
     /**
      * Parse order address
      * @param OrderAddressEntity $address
