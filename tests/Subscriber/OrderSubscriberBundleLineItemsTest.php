@@ -197,4 +197,26 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
         $this->assertSame([], $result['products']);
         $this->assertSame(0.0, $result['subTotalPrice']);
     }
+
+    public function testDeliveryPositionWithoutLineItemIsSkipped(): void
+    {
+        [$lineItems, $single] = $this->bundleOrderLineItems();
+        $orphan = new OrderDeliveryPositionEntity();
+        $orphan->setId(Uuid::randomHex());
+        $positions = new OrderDeliveryPositionCollection([$orphan, $this->position($single)]);
+
+        $shipment = $this->call('readDeliveryPositions', $positions, $this->call('readLineItems', $lineItems));
+
+        $this->assertSame(['SINGLE-1'], array_column($shipment, 'sku'));
+    }
+
+    public function testSkuFallsBackToPayloadProductNumberWithoutProductEntity(): void
+    {
+        $item = $this->lineItem('product', 'Unloaded Product', 4.5);
+        $item->setPayload(['productNumber' => 'PAYLOAD-SKU']);
+
+        $result = $this->call('readLineItems', new OrderLineItemCollection([$item]));
+
+        $this->assertSame('PAYLOAD-SKU', $result['products'][0]['sku']);
+    }
 }
