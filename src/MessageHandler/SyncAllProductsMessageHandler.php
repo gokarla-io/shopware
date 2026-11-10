@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Karla\Delivery\MessageHandler;
 
 use Karla\Delivery\Message\SyncAllProductsMessage;
+use Karla\Delivery\Message\SyncProductUrlsMessage;
 use Karla\Delivery\Service\ProductSyncService;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
@@ -79,7 +80,8 @@ class SyncAllProductsMessageHandler
                     'next_offset' => $nextMessage->getOffset(),
                 ]);
             } else {
-                // All done!
+                // Reconcile existing catalog rows too, including products no longer in the active sync.
+                $this->messageBus->dispatch(new SyncProductUrlsMessage([], $salesChannelId, true));
                 $this->systemConfigService->set('KarlaDelivery.config.productSyncStatus', 'completed', $salesChannelId);
 
                 $this->logger->info('Product bulk sync completed', [

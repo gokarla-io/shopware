@@ -84,6 +84,9 @@
             <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
             <argument type="service" id="monolog.logger.karla_delivery"/>
             <argument type="service" id="Doctrine\DBAL\Connection"/>
+            <argument type="service" id="seo_url.repository"/>
+            <argument type="service" id="sales_channel.repository"/>
+            <tag name="kernel.reset" method="reset"/>
         </service>
 
         <service id="Karla\Delivery\Subscriber\ProductSubscriber">
@@ -91,6 +94,54 @@
             <argument type="service" id="monolog.logger.karla_delivery"/>
             <argument type="service" id="product.repository"/>
             <argument type="service" id="Karla\Delivery\Service\ProductSyncService"/>
+            <argument type="service" id="messenger.default_bus"/>
+            <tag name="kernel.event_subscriber"/>
+        </service>
+
+        <service id="Karla\Delivery\Subscriber\CatalogDeletionSubscriber">
+            <argument type="service" id="product_visibility.repository"/>
+            <argument type="service" id="seo_url.repository"/>
+            <argument type="service" id="messenger.default_bus"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+            <tag name="kernel.event_subscriber"/>
+            <tag name="kernel.reset" method="reset"/>
+        </service>
+
+        <service id="Karla\Delivery\Service\CatalogApiClient">
+            <argument type="service" id="http_client"/>
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+        </service>
+        <service id="Karla\Delivery\Service\CatalogCleanupService">
+            <argument type="service" id="product.repository"/>
+            <argument type="service" id="sales_channel.repository"/>
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="Karla\Delivery\Service\ProductSyncService"/>
+            <argument type="service" id="Karla\Delivery\Service\CatalogApiClient"/>
+            <argument type="service" id="Doctrine\DBAL\Connection"/>
+        </service>
+
+        <service id="Karla\Delivery\Service\ProductSeoUrlPersister" decorates="Shopware\Core\Content\Seo\SeoUrlPersister">
+            <argument type="service" id="Karla\Delivery\Service\ProductSeoUrlPersister.inner"/>
+            <argument type="service" id="Karla\Delivery\Service\ProductSyncService"/>
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="messenger.default_bus"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
+            <argument type="service" id="seo_url.repository"/>
+        </service>
+
+        <service id="Karla\Delivery\MessageHandler\SyncProductUrlsMessageHandler">
+            <argument type="service" id="Karla\Delivery\Service\ProductSyncService"/>
+            <argument type="service" id="Shopware\Core\System\SystemConfig\SystemConfigService"/>
+            <argument type="service" id="Karla\Delivery\Service\CatalogCleanupService"/>
+            <argument type="service" id="messenger.default_bus"/>
+            <tag name="messenger.message_handler"/>
+        </service>
+
+        <service id="Karla\Delivery\Subscriber\SeoUrlSubscriber">
+            <argument type="service" id="seo_url.repository"/>
+            <argument type="service" id="messenger.default_bus"/>
+            <argument type="service" id="monolog.logger.karla_delivery"/>
             <tag name="kernel.event_subscriber"/>
         </service>
 

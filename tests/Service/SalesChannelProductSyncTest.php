@@ -6,6 +6,7 @@ namespace Karla\Delivery\Tests\Service;
 
 use Doctrine\DBAL\Connection;
 use Karla\Delivery\Message\SyncAllProductsMessage;
+use Karla\Delivery\Message\SyncProductUrlsMessage;
 use Karla\Delivery\MessageHandler\SyncAllProductsMessageHandler;
 use Karla\Delivery\Service\ProductSyncService;
 use Karla\Delivery\Subscriber\ProductSubscriber;
@@ -33,7 +34,7 @@ final class SalesChannelProductSyncTest extends TestCase
         $connection = $this->createMock(Connection::class);
         $connection->method('fetchOne')->willReturnOnConsecutiveCalls(false, 1);
         $connection->method('fetchFirstColumn')->willReturn(['first', 'second']);
-        $service = new ProductSyncService($this->createMock(EntityRepository::class), $this->createMock(HttpClientInterface::class), $this->createMock(SystemConfigService::class), new NullLogger(), $connection);
+        $service = new ProductSyncService($this->createMock(EntityRepository::class), $this->createMock(HttpClientInterface::class), $this->createMock(SystemConfigService::class), new NullLogger(), $connection, $this->createMock(EntityRepository::class), $this->createMock(EntityRepository::class));
         self::assertNull($service->getSalesChannelIds());
         self::assertSame(['first', 'second'], $service->getSalesChannelIds());
     }
@@ -82,11 +83,31 @@ final class SalesChannelProductSyncTest extends TestCase
 
             return $response;
         });
-        $service = new ProductSyncService($repository, $client, $config, new NullLogger(), $this->createMock(Connection::class));
+        $service = new ProductSyncService($repository, $client, $config, new NullLogger(), $this->createMock(Connection::class), $this->createMock(EntityRepository::class), $this->createMock(EntityRepository::class));
         foreach (['first', 'second'] as $channel) {
             self::assertFalse($service->syncProductBatch(0, 50, $channel));
             $service->deleteProduct($channel . '-product', $channel);
         }
+    }
+
+    public function testLegacyBatchConsidersInheritedActivityAndStorefrontVisibility(): void
+    {
+        $repository = $this->createMock(EntityRepository::class);
+        $repository->expects(self::once())->method('search')->willReturnCallback(static function (Criteria $criteria, Context $context) {
+            self::assertTrue($context->considerInheritance());
+            $filters = [];
+            foreach ($criteria->getFilters() as $filter) {
+                self::assertInstanceOf(\Shopware\Core\Framework\DataAbstractionLayer\Search\Filter\EqualsFilter::class, $filter);
+                $filters[$filter->getField()] = $filter->getValue();
+            }
+            self::assertTrue($filters['active']);
+            self::assertTrue($filters['visibilities.salesChannel.active']);
+            self::assertSame(\Shopware\Core\Defaults::SALES_CHANNEL_TYPE_STOREFRONT, $filters['visibilities.salesChannel.typeId']);
+
+            return new EntitySearchResult('product', 0, new ProductCollection(), null, $criteria, $context);
+        });
+        $service = new ProductSyncService($repository, $this->createMock(HttpClientInterface::class), $this->createMock(SystemConfigService::class), new NullLogger(), $this->createMock(Connection::class), $this->createMock(EntityRepository::class), $this->createMock(EntityRepository::class));
+        self::assertFalse($service->syncProductBatch(0, 100));
     }
 
     public static function batchStates(): array
@@ -105,9 +126,16 @@ final class SalesChannelProductSyncTest extends TestCase
             $config->expects(self::once())->method('set')->with('KarlaDelivery.config.productSyncStatus', 'completed', 'second');
         }
         $bus = $this->createMock(MessageBusInterface::class);
-        $bus->expects($more ? self::once() : self::never())->method('dispatch')->willReturnCallback(static function (SyncAllProductsMessage $next) {
-            self::assertSame('second', $next->getSalesChannelId());
-            self::assertSame(100, $next->getOffset());
+        $bus->expects($enabled ? self::once() : self::never())->method('dispatch')->willReturnCallback(static function ($next) use ($more) {
+            if ($more) {
+                self::assertInstanceOf(SyncAllProductsMessage::class, $next);
+                self::assertSame('second', $next->getSalesChannelId());
+                self::assertSame(100, $next->getOffset());
+            } else {
+                self::assertInstanceOf(SyncProductUrlsMessage::class, $next);
+                self::assertSame('second', $next->salesChannelId);
+                self::assertTrue($next->reconcile);
+            }
 
             return new Envelope($next);
         });
@@ -149,10 +177,11 @@ final class SalesChannelProductSyncTest extends TestCase
         });
         $service = $this->createMock(ProductSyncService::class);
         $service->method('getSalesChannelIds')->willReturn(['second']);
+        $service->method('getShopSlug')->willReturn('configured');
         $service->expects(self::once())->method('scopeCriteria')->with(self::isInstanceOf(Criteria::class), 'second');
-        $service->expects(self::once())->method('upsertProduct')->with($product, null, 'second');
+        $service->expects(self::once())->method('upsertProducts')->with([$product], null, 'second', false);
         $service->expects(self::once())->method('deleteProduct')->with('product', 'second');
-        $subscriber = new ProductSubscriber($config, new NullLogger(), $repository, $service);
+        $subscriber = new ProductSubscriber($config, new NullLogger(), $repository, $service, $this->createMock(MessageBusInterface::class));
         $context = Context::createDefaultContext();
         $written = $this->createMock(EntityWrittenEvent::class);
         $written->method('getContext')->willReturn($context);
@@ -168,7 +197,7 @@ final class SalesChannelProductSyncTest extends TestCase
     {
         $service = $this->createMock(ProductSyncService::class);
         $service->method('getSalesChannelIds')->willThrowException(new \RuntimeException('Database unavailable'));
-        $subscriber = new ProductSubscriber($this->createMock(SystemConfigService::class), new NullLogger(), $this->createMock(EntityRepository::class), $service);
+        $subscriber = new ProductSubscriber($this->createMock(SystemConfigService::class), new NullLogger(), $this->createMock(EntityRepository::class), $service, $this->createMock(MessageBusInterface::class));
         $service->expects(self::never())->method('upsertProduct');
         $service->expects(self::never())->method('deleteProduct');
         $subscriber->onProductWritten($this->createMock(EntityWrittenEvent::class));

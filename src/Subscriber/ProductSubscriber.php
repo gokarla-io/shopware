@@ -4,16 +4,19 @@ declare(strict_types=1);
 
 namespace Karla\Delivery\Subscriber;
 
+use Karla\Delivery\Message\SyncProductUrlsMessage;
 use Karla\Delivery\Service\ProductSyncService;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\Content\Product\ProductEntity;
 use Shopware\Core\Content\Product\ProductEvents;
+use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityDeletedEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 class ProductSubscriber implements EventSubscriberInterface
 {
@@ -26,7 +29,8 @@ class ProductSubscriber implements EventSubscriberInterface
         SystemConfigService $systemConfigService,
         LoggerInterface $logger,
         EntityRepository $productRepository,
-        ProductSyncService $productSyncService
+        ProductSyncService $productSyncService,
+        private MessageBusInterface $bus
     ) {
         $this->logger = $logger;
         $this->productRepository = $productRepository;
@@ -58,30 +62,53 @@ class ProductSubscriber implements EventSubscriberInterface
 
     private function processProductWritten(EntityWrittenEvent $event, ?string $salesChannelId): void
     {
+        if ($this->isSyncConfigured($salesChannelId)) {
+            // product.written precedes SEO indexing, so preserve existing URLs.
+            $ids = $event->getIds();
+            $this->syncProducts($ids, $event->getContext(), $salesChannelId);
+            // Availability must not depend on an SEO template or a selected domain language.
+            // Keep URLs untouched until the separate post-index refresh.
+            if ($ids !== []) {
+                try {
+                    $this->bus->dispatch(new SyncProductUrlsMessage($ids, $salesChannelId, refreshUrls: false));
+                } catch (\Throwable $error) {
+                    $this->logger->error('Unable to queue product availability cleanup', ['error' => $error->getMessage()]);
+                }
+            }
+        }
+    }
+
+    private function isSyncConfigured(?string $salesChannelId): bool
+    {
         // Skip if product sync is disabled
         $productSyncEnabled = $this->systemConfigService->get('KarlaDelivery.config.productSyncEnabled', $salesChannelId) ?? false;
         if (! $productSyncEnabled) {
-            return;
+            return false;
         }
 
+        // Verify API configuration
+        $shopSlug = $this->productSyncService->getShopSlug($salesChannelId);
+        $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId) ?? '';
+        $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId) ?? '';
+        $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId) ?? '';
+
+        if (empty($shopSlug) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
+            $this->logger->warning('Product sync skipped - missing configuration', [
+                'component' => 'product.sync',
+            ]);
+
+            return false;
+        }
+
+        return true;
+    }
+
+    /** @param list<string> $productIds */
+    private function syncProducts(array $productIds, Context $context, ?string $salesChannelId): void
+    {
         try {
-            // Verify API configuration
-            $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug', $salesChannelId) ?? '';
-            $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId) ?? '';
-            $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId) ?? '';
-            $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId) ?? '';
-
-            if (($salesChannelId === null && empty($shopSlug)) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
-                $this->logger->warning('Product sync skipped - missing configuration', [
-                    'component' => 'product.sync',
-                ]);
-
-                return;
-            }
-
-            $context = clone $event->getContext();
-            $context->setConsiderInheritance($salesChannelId !== null);
-            $productIds = $event->getIds();
+            $context = clone $context;
+            $context->setConsiderInheritance(true);
 
             $criteria = new Criteria($productIds);
             $this->productSyncService->scopeCriteria($criteria, $salesChannelId);
@@ -94,6 +121,9 @@ class ProductSubscriber implements EventSubscriberInterface
             ]);
 
             $products = $this->productRepository->search($criteria, $context);
+
+            /** @var array<ProductEntity> $standaloneProducts */
+            $standaloneProducts = [];
 
             /** @var ProductEntity $product */
             foreach ($products as $product) {
@@ -136,11 +166,13 @@ class ProductSubscriber implements EventSubscriberInterface
                         'variants_found' => $variants->count(),
                     ]);
 
-                    // Sync each variant with the parent entity
-                    /** @var ProductEntity $variant */
-                    foreach ($variants as $variant) {
-                        $this->productSyncService->upsertProduct($variant, $product, $salesChannelId);
+                    // Sync all variants in one call so product URLs are resolved
+                    // with a single batched SEO query instead of one per variant
+                    /** @var array<ProductEntity> $variantList */
+                    $variantList = iterator_to_array($variants, false);
+                    $this->productSyncService->upsertProducts($variantList, $product, $salesChannelId, false);
 
+                    foreach ($variantList as $variant) {
                         $this->logger->info('Variant synced to Karla', [
                             'component' => 'product.sync',
                             'variant_number' => $variant->getProductNumber(),
@@ -148,9 +180,17 @@ class ProductSubscriber implements EventSubscriberInterface
                         ]);
                     }
                 } else {
-                    // Regular product or variant - sync it
-                    $this->productSyncService->upsertProduct($product, null, $salesChannelId);
+                    // Regular product or variant - collect for one batched sync
+                    $standaloneProducts[] = $product;
+                }
+            }
 
+            if (count($standaloneProducts) > 0) {
+                // One call for the whole event: product URLs resolve with a
+                // single batched SEO query instead of one per product
+                $this->productSyncService->upsertProducts($standaloneProducts, null, $salesChannelId, false);
+
+                foreach ($standaloneProducts as $product) {
                     $this->logger->info('Product synced to Karla', [
                         'component' => 'product.sync',
                         'product_number' => $product->getProductNumber(),
@@ -193,12 +233,12 @@ class ProductSubscriber implements EventSubscriberInterface
 
         try {
             // Verify API configuration
-            $shopSlug = $this->systemConfigService->get('KarlaDelivery.config.shopSlug', $salesChannelId) ?? '';
+            $shopSlug = $this->productSyncService->getShopSlug($salesChannelId);
             $apiUsername = $this->systemConfigService->get('KarlaDelivery.config.apiUsername', $salesChannelId) ?? '';
             $apiKey = $this->systemConfigService->get('KarlaDelivery.config.apiKey', $salesChannelId) ?? '';
             $apiUrl = $this->systemConfigService->get('KarlaDelivery.config.apiUrl', $salesChannelId) ?? '';
 
-            if (($salesChannelId === null && empty($shopSlug)) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
+            if (empty($shopSlug) || empty($apiUsername) || empty($apiKey) || empty($apiUrl)) {
                 $this->logger->warning('Product deletion sync skipped - missing configuration', [
                     'component' => 'product.sync',
                 ]);

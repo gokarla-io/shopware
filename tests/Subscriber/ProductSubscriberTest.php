@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Karla\Delivery\Tests\Subscriber;
 
+use Doctrine\DBAL\Connection;
+use Karla\Delivery\Message\SyncProductUrlsMessage;
 use Karla\Delivery\Service\ProductSyncService;
 use Karla\Delivery\Subscriber\ProductSubscriber;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -15,9 +17,14 @@ use Shopware\Core\Framework\Context;
 use Shopware\Core\Framework\DataAbstractionLayer\EntityRepository;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityDeletedEvent;
 use Shopware\Core\Framework\DataAbstractionLayer\Event\EntityWrittenEvent;
+use Shopware\Core\Framework\DataAbstractionLayer\Search\Criteria;
 use Shopware\Core\Framework\DataAbstractionLayer\Search\EntitySearchResult;
 use Shopware\Core\Framework\Uuid\Uuid;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Contracts\HttpClient\ResponseInterface;
 
 /**
  * @internal
@@ -38,6 +45,9 @@ final class ProductSubscriberTest extends TestCase
     /** @var ProductSyncService&MockObject */
     private ProductSyncService $productSyncServiceMock;
 
+    /** @var MessageBusInterface&MockObject */
+    private MessageBusInterface $bus;
+
     private ProductSubscriber $subscriber;
 
     protected function setUp(): void
@@ -46,12 +56,16 @@ final class ProductSubscriberTest extends TestCase
         $this->loggerMock = $this->createMock(LoggerInterface::class);
         $this->productRepositoryMock = $this->createMock(EntityRepository::class);
         $this->productSyncServiceMock = $this->createMock(ProductSyncService::class);
+        $this->productSyncServiceMock->method('getShopSlug')->willReturnCallback(fn ($channel) => (string) $this->systemConfigServiceMock->get('KarlaDelivery.config.shopSlug', $channel));
 
+        $this->bus = $this->createMock(MessageBusInterface::class);
+        $this->bus->method('dispatch')->willReturnCallback(static fn ($message) => new Envelope($message));
         $this->subscriber = new ProductSubscriber(
             $this->systemConfigServiceMock,
             $this->loggerMock,
             $this->productRepositoryMock,
-            $this->productSyncServiceMock
+            $this->productSyncServiceMock,
+            $this->bus
         );
     }
 
@@ -76,6 +90,8 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenWhenDisabled(): void
@@ -92,16 +108,26 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
-    public function testOnProductWrittenSkipsWhenConfigMissing(): void
+    public static function missingDestinationCases(): array
     {
+        return ['global missing slug' => [null], 'scoped headless missing slug' => ['headless']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('missingDestinationCases')]
+    public function testOnProductWrittenSkipsWhenConfigMissing(?string $channel): void
+    {
+        $this->productSyncServiceMock->method('getSalesChannelIds')->willReturn($channel === null ? null : [$channel]);
+        $this->bus->expects(self::never())->method('dispatch');
         $this->systemConfigServiceMock->method('get')->willReturnMap([
-            ['KarlaDelivery.config.productSyncEnabled', null, true],
-            ['KarlaDelivery.config.shopSlug', null, ''], // Missing
-            ['KarlaDelivery.config.apiUsername', null, 'user'],
-            ['KarlaDelivery.config.apiKey', null, 'key'],
-            ['KarlaDelivery.config.apiUrl', null, 'https://api.test.com'],
+            ['KarlaDelivery.config.productSyncEnabled', $channel, true],
+            ['KarlaDelivery.config.shopSlug', $channel, ''], // Missing
+            ['KarlaDelivery.config.apiUsername', $channel, 'user'],
+            ['KarlaDelivery.config.apiKey', $channel, 'key'],
+            ['KarlaDelivery.config.apiUrl', $channel, 'https://api.test.com'],
         ]);
 
         $event = $this->createMock(EntityWrittenEvent::class);
@@ -120,6 +146,8 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenSyncsActiveProduct(): void
@@ -147,9 +175,11 @@ final class ProductSubscriberTest extends TestCase
             ->method('search')
             ->willReturn($searchResult);
 
+        // Standalone products are synced in ONE batched call
         $this->productSyncServiceMock->expects($this->once())
-            ->method('upsertProduct')
-            ->with($product);
+            ->method('upsertProducts')
+            ->with([$product]);
+        $this->productSyncServiceMock->expects($this->never())->method('upsertProduct');
 
         $this->loggerMock->expects($this->once())
             ->method('info')
@@ -168,9 +198,17 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
-    public function testOnProductWrittenSkipsInactiveProduct(): void
+    public static function availabilityQueueCases(): array
+    {
+        return ['queued without SEO' => [false], 'queue failure is logged' => [true]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('availabilityQueueCases')]
+    public function testOnProductWrittenSkipsInactiveProduct(bool $queueFails): void
     {
         $productId = Uuid::randomHex();
 
@@ -193,16 +231,31 @@ final class ProductSubscriberTest extends TestCase
 
         // Should not sync
         $this->productSyncServiceMock->expects($this->never())->method('upsertProduct');
+        $this->productSyncServiceMock->expects($this->never())->method('upsertProducts');
 
         $event = $this->createMock(EntityWrittenEvent::class);
         $event->method('getContext')->willReturn(Context::createDefaultContext());
         $event->method('getIds')->willReturn([$productId]);
 
+        if ($queueFails) {
+            $this->bus->method('dispatch')->willThrowException(new \RuntimeException('Queue down'));
+            $this->loggerMock->expects(self::once())->method('error')->with('Unable to queue product availability cleanup', ['error' => 'Queue down']);
+        } else {
+            $this->bus->expects(self::once())->method('dispatch')->willReturnCallback(static function ($message) use ($productId) {
+                self::assertInstanceOf(SyncProductUrlsMessage::class, $message);
+                self::assertSame([$productId], $message->productIds);
+                self::assertFalse($message->refreshUrls);
+
+                return new Envelope($message);
+            });
+        }
         $this->subscriber->onProductWritten($event);
     }
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
     public function testOnProductWrittenHandlesException(): void
@@ -357,6 +410,8 @@ final class ProductSubscriberTest extends TestCase
 
     /**
      * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
      * @covers ::onProductWritten
      */
     #[\PHPUnit\Framework\Attributes\DataProvider('parentChildCounts')]
@@ -406,13 +461,17 @@ final class ProductSubscriberTest extends TestCase
             ->method('search')
             ->willReturnOnConsecutiveCalls($parentSearchResult, $variantSearchResult);
 
-        // Should sync both variants (not the parent)
+        // Should sync both variants (not the parent) in ONE batched call,
+        // so product URLs resolve with a single SEO query instead of N
         $syncedProducts = [];
-        $this->productSyncServiceMock->expects($this->exactly(2))
-            ->method('upsertProduct')
-            ->willReturnCallback(function ($product) use (&$syncedProducts) {
-                $syncedProducts[] = $product;
+        $syncedParent = null;
+        $this->productSyncServiceMock->expects($this->once())
+            ->method('upsertProducts')
+            ->willReturnCallback(function (array $products, $parent) use (&$syncedProducts, &$syncedParent) {
+                $syncedProducts = $products;
+                $syncedParent = $parent;
             });
+        $this->productSyncServiceMock->expects($this->never())->method('upsertProduct');
 
         $this->loggerMock->expects($this->atLeast(1))
             ->method('debug');
@@ -432,14 +491,95 @@ final class ProductSubscriberTest extends TestCase
 
         $this->subscriber->onProductWritten($event);
 
-        // Assert both variants were synced
+        // Assert both variants were synced with their parent
         $this->assertCount(2, $syncedProducts);
         $this->assertSame($variant1, $syncedProducts[0]);
         $this->assertSame($variant2, $syncedProducts[1]);
+        $this->assertSame($parentProduct, $syncedParent);
 
         // Assert both variants were logged
         $this->assertCount(2, $loggedVariants);
         $this->assertContains('VARIANT-001', $loggedVariants);
         $this->assertContains('VARIANT-002', $loggedVariants);
+    }
+
+    /**
+     * Regression: a write touching only variants used to PUT title: null
+     * because their parent was never loaded, so the loaded parent's real
+     * title was never sent (and older APIs rejected the null with 422).
+     *
+     * @covers ::processProductWritten
+     * @covers ::isSyncConfigured
+     * @covers ::syncProducts
+     * @covers ::onProductWritten
+     */
+    public function testChildOnlyWriteSendsParentTitleWithOneParentLookup(): void
+    {
+        $this->systemConfigServiceMock->method('get')->willReturnMap([
+            ['KarlaDelivery.config.productSyncEnabled', null, true],
+            ['KarlaDelivery.config.shopSlug', null, 'test-shop'],
+            ['KarlaDelivery.config.apiUsername', null, 'user'],
+            ['KarlaDelivery.config.apiKey', null, 'key'],
+            ['KarlaDelivery.config.apiUrl', null, 'https://api.test.com'],
+            ['KarlaDelivery.config.debugMode', null, false],
+            ['KarlaDelivery.config.requestTimeout', null, 10.0],
+        ]);
+        $variants = [];
+        foreach (['red' => 'Red', 'blue' => null] as $id => $name) {
+            $variant = $this->createMock(ProductEntity::class);
+            $variant->method('getId')->willReturn($id);
+            $variant->method('getParentId')->willReturn('parent');
+            $variant->method('getActive')->willReturn(true);
+            $variant->method('getProductNumber')->willReturn('SW-' . $id);
+            $variant->method('getName')->willReturn($name);
+            $variants[] = $variant;
+        }
+        $parent = $this->createMock(ProductEntity::class);
+        $parent->method('getId')->willReturn('parent');
+        $parent->method('getName')->willReturn('Parent title');
+        $results = [$variants, [$parent]];
+        $this->productRepositoryMock->expects(self::exactly(2))->method('search')
+            ->willReturnCallback(function (Criteria $criteria) use (&$results) {
+                if (count($results) === 1) {
+                    self::assertSame(['parent'], $criteria->getIds());
+                }
+                $result = $this->createMock(EntitySearchResult::class);
+                $result->method('getIterator')->willReturn(new \ArrayIterator(array_shift($results)));
+
+                return $result;
+            });
+        $requests = [];
+        $response = $this->createMock(ResponseInterface::class);
+        $response->method('getStatusCode')->willReturn(200);
+        $httpClient = $this->createMock(HttpClientInterface::class);
+        $httpClient->method('request')->willReturnCallback(
+            function (string $method, string $url, array $options) use (&$requests, $response): ResponseInterface {
+                $requests[] = [$method, $url, json_decode((string) $options['body'], true)];
+
+                return $response;
+            }
+        );
+        $service = new ProductSyncService(
+            $this->productRepositoryMock,
+            $httpClient,
+            $this->systemConfigServiceMock,
+            $this->loggerMock,
+            $this->createMock(Connection::class),
+            $this->createMock(EntityRepository::class),
+            $this->createMock(EntityRepository::class)
+        );
+        $this->loggerMock->expects(self::never())->method('error');
+        $event = $this->createMock(EntityWrittenEvent::class);
+        $event->method('getContext')->willReturn(Context::createDefaultContext());
+        $event->method('getIds')->willReturn(['red', 'blue']);
+
+        (new ProductSubscriber($this->systemConfigServiceMock, $this->loggerMock, $this->productRepositoryMock, $service, $this->bus))
+            ->onProductWritten($event);
+
+        $url = 'https://api.test.com/v1/shops/test-shop/products/parent/variants/';
+        self::assertSame([
+            ['PUT', $url . 'red', ['title' => 'Parent title', 'variant_title' => 'Red', 'price' => null, 'sku' => 'SW-red']],
+            ['PUT', $url . 'blue', ['title' => 'Parent title', 'variant_title' => 'SW-blue', 'price' => null, 'sku' => 'SW-blue']],
+        ], $requests);
     }
 }

@@ -93,6 +93,60 @@ After installation, configure the extension:
 - Order Statuses: Enable "In Progress" and "Completed"
 - Delivery Statuses: Enable "Shipped" and "Shipped Partially"
 
+### Product titles and API compatibility
+
+Deploy the Karla backend with legacy null-title compatibility before installing
+this release, together with the variant-archive API described below. Direct
+variant updates load their parent names in a batch. When a parent is missing,
+unnamed or temporarily cannot be read, the plugin sends `title: null` alongside
+a nonblank `variant_title`. The updated API preserves an existing catalog title
+and derives a title for a new record from the variant name or SKU. This prevents
+a temporary parent lookup failure from overwriting a correct product title.
+Older APIs reject that payload with HTTP 422. Run a full product sync after the
+upgrade to repair catalog updates missed by older plugin versions.
+
+### Product URL synchronization
+
+Run a full product sync after installing the update to populate existing catalog
+URLs. Realtime URL changes are queued after Shopware persists SEO paths, including
+URL removals, manual SEO edits and products displaced by SEO path collisions. Keep a Shopware worker consuming the `async`
+transport and restart workers after updating the plugin; pending jobs delay URL
+updates and catalog cleanup. Failed API requests are retried by Shopware's queue;
+monitor failed messages and retry them after fixing the underlying API issue.
+
+URLs use the storefront's default-language domain when available, prefer HTTPS,
+and fall back from a variant's URL to its parent's. Keep the configured domains
+customer-facing. With multiple storefronts, configure one Karla destination per
+storefront or enable product sync for only one storefront per destination. If
+several enabled storefronts share the same API address and shop slug, the plugin
+omits URLs rather than choosing a domain for that shared catalog.
+
+### Unavailable product cleanup
+
+Product writes queue availability cleanup independently of SEO templates and
+domain languages. After product indexing or a visibility removal, queued jobs
+archive existing Karla catalog variants that are inactive or no longer visible
+in an enabled storefront. Archival preserves the catalog UUID and historical
+order, shipment and campaign links. Reactivating a product or restoring visibility
+publishes the same catalog record again. If enabled
+storefronts share a Karla destination, a variant remains while any of them still
+makes it available. Catalog workers serialize cleanup and refreshes per API
+address and shop slug, including the full-catalog snapshot. Busy jobs retry after
+five seconds. In legacy global configuration, publishing now requires visibility
+in an active storefront; headless/API-only products are excluded.
+
+Run a full product sync after upgrading to clean up older stale entries. When the
+active-product sync finishes, it queues reconciliation of the existing Karla
+catalog in batches of 100; allow the async queue to drain before considering the
+cleanup complete. This requires the backend variant-archive API before the plugin
+upgrade; cleanup never falls back to physical deletion. Global refreshes fan out
+into independent destination jobs so one failed API cannot block another shop.
+Channels without a resolved shop slug, API URL or credentials are skipped.
+Only entries matched to current native Shopware products are retired. Unknown or
+manually managed catalog entries are preserved; historical entries for products
+already physically deleted need separate investigation. Schedule the backfill
+without concurrent physical product deletions, which use the existing delete path.
+
 ## Support
 
 - **Documentation**: [docs.gokarla.io](https://docs.gokarla.io/docs/shop-integrations/shopware)

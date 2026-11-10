@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace Karla\Delivery\Tests\MessageHandler;
 
 use Karla\Delivery\Message\SyncAllProductsMessage;
+use Karla\Delivery\Message\SyncProductUrlsMessage;
 use Karla\Delivery\MessageHandler\SyncAllProductsMessageHandler;
 use Karla\Delivery\Service\ProductSyncService;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use Shopware\Core\System\SystemConfig\SystemConfigService;
+use Symfony\Component\Messenger\Envelope;
 use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
@@ -109,9 +111,14 @@ final class SyncAllProductsMessageHandlerTest extends TestCase
             ->with(450, 50)
             ->willReturn(false);
 
-        // Should NOT dispatch next message
-        $this->messageBusMock->expects($this->never())
-            ->method('dispatch');
+        // Reconcile the existing catalog after the upload snapshot is complete.
+        $this->messageBusMock->expects($this->once())->method('dispatch')->willReturnCallback(static function ($queued) {
+            self::assertInstanceOf(SyncProductUrlsMessage::class, $queued);
+            self::assertTrue($queued->reconcile);
+            self::assertSame([], $queued->productIds);
+
+            return new Envelope($queued);
+        });
 
         // Expect status to be set to 'completed'
         $this->systemConfigServiceMock->expects($this->once())
