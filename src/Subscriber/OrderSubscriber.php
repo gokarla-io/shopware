@@ -99,11 +99,6 @@ class OrderSubscriber implements EventSubscriberInterface
     private array $allowedDeliveryStatuses = [];
 
     /**
-     * @var string
-     */
-    private string $depositLineItemType;
-
-    /**
      * Line item types sent to Karla as products: `product` plus the configured deposit type.
      *
      * @var list<string>
@@ -224,10 +219,8 @@ class OrderSubscriber implements EventSubscriberInterface
         }
 
         // Mappings Configuration
-        $this->depositLineItemType = $systemConfigService->get(
-            'KarlaDelivery.config.depositLineItemType'
-        );
-        $this->productLineItemTypes = array_values(array_filter(['product', $this->depositLineItemType]));
+        $depositLineItemType = $systemConfigService->get('KarlaDelivery.config.depositLineItemType');
+        $this->productLineItemTypes = array_values(array_filter(['product', $depositLineItemType]));
 
         // Sales Channel Mapping Configuration
         $salesChannelMappingConfig = $systemConfigService->get(
@@ -846,6 +839,7 @@ class OrderSubscriber implements EventSubscriberInterface
         $discounts = [];
         $discountPrice = 0.0;
         $rootIdByLineItemId = [];
+        $rootsById = [];
         $productItemsByRootId = [];
 
         foreach ($lineItems as $lineItem) {
@@ -865,21 +859,21 @@ class OrderSubscriber implements EventSubscriberInterface
                 }
                 $rootIdByLineItemId[$lineItem->getId()] = $root->getId();
                 $rootIdByLineItemId[$root->getId()] = $root->getId();
+                $rootsById[$root->getId()] = $root;
                 $productItemsByRootId[$root->getId()][] = $lineItem;
             }
         }
 
-        $products = [];
         $productsByRootId = [];
         $subTotalPrice = 0.0;
         foreach ($productItemsByRootId as $rootId => $productItems) {
-            $root = $lineItems->get($rootId) ?? $productItems[0];
+            $root = $rootsById[$rootId];
             $subTotalPrice += $root->getTotalPrice();
-            $products[] = $productsByRootId[$rootId] = $this->buildProductPayload($root, $productItems);
+            $productsByRootId[$rootId] = $this->buildProductPayload($root, $productItems);
         }
 
         return [
-        'products' => $products,
+        'products' => array_values($productsByRootId),
         'productsByRootId' => $productsByRootId,
         'rootIdByLineItemId' => $rootIdByLineItemId,
         'discounts' => $discounts,
