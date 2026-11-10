@@ -93,16 +93,16 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
     /**
      * @return array{OrderLineItemCollection, OrderLineItemEntity, OrderLineItemEntity, OrderLineItemEntity}
      */
-    private function b800131LineItems(): array
+    private function bundleOrderLineItems(): array
     {
-        $salami = $this->lineItem('product', 'Levoni Salami Milano, 250 g', 9.99, null, $this->product('LV_733'));
-        $bundle = $this->lineItem('bill-of-materials', 'Latteria Sorrentina Fior di Latte Mini-Pack, 150 g', 6.89);
+        $salami = $this->lineItem('product', 'Single Product', 9.99, null, $this->product('SINGLE-1'));
+        $bundle = $this->lineItem('bill-of-materials', 'Bundle Product', 6.89);
         $stock = $this->lineItem(
             'product',
-            'Stückliste SO_070803_1X: [BESTAND] Latteria Sorrentina Fior di Latte Mini-Pack, 150 g',
+            'Stückliste BUNDLE-1X: [BESTAND] Bundle Product',
             0.0,
             $bundle->getId(),
-            $this->product('SO_070803_BESTAND'),
+            $this->product('BUNDLE-STOCK'),
         );
 
         return [new OrderLineItemCollection([$salami, $bundle, $stock]), $salami, $bundle, $stock];
@@ -129,12 +129,12 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
 
     public function testBundleParentIsSentWithItsPriceAndChildIsNotDuplicated(): void
     {
-        [$lineItems, , $bundle, $stock] = $this->b800131LineItems();
+        [$lineItems, , $bundle, $stock] = $this->bundleOrderLineItems();
 
         $result = $this->call('readLineItems', $lineItems);
 
         $this->assertCount(2, $result['products']);
-        $this->assertSame(['LV_733', 'SO_070803_BESTAND'], array_column($result['products'], 'sku'));
+        $this->assertSame(['SINGLE-1', 'BUNDLE-STOCK'], array_column($result['products'], 'sku'));
         $bundleProduct = $result['products'][1];
         $this->assertSame($bundle->getLabel(), $bundleProduct['title']);
         $this->assertSame(6.89, $bundleProduct['price']);
@@ -145,7 +145,7 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
 
     public function testDeliveryPositionOnBundleParentMatchesOrderProducts(): void
     {
-        [$lineItems, $salami, $bundle] = $this->b800131LineItems();
+        [$lineItems, $salami, $bundle] = $this->bundleOrderLineItems();
         $positions = new OrderDeliveryPositionCollection([$this->position($salami), $this->position($bundle)]);
 
         $order = $this->call('readLineItems', $lineItems);
@@ -159,9 +159,9 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
 
     public function testDeliveryPositionsOnBundleChildrenAreMappedToParentOnce(): void
     {
-        $bundle = $this->lineItem('bill-of-materials', 'Pizza-Set', 20.0);
-        $flour = $this->lineItem('product', 'Mehl', 0.0, $bundle->getId(), $this->product('FLOUR'));
-        $tomatoes = $this->lineItem('product', 'Tomaten', 0.0, $bundle->getId(), $this->product('TOMATO'));
+        $bundle = $this->lineItem('bill-of-materials', 'Multi-Part Set', 20.0);
+        $flour = $this->lineItem('product', 'Part A', 0.0, $bundle->getId(), $this->product('PART-A'));
+        $tomatoes = $this->lineItem('product', 'Part B', 0.0, $bundle->getId(), $this->product('PART-B'));
         $lineItems = new OrderLineItemCollection([$bundle, $flour, $tomatoes]);
         $positions = new OrderDeliveryPositionCollection([$this->position($flour), $this->position($tomatoes)]);
 
@@ -169,7 +169,7 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
         $shipment = $this->call('readDeliveryPositions', $positions, $lineItems);
 
         $this->assertCount(1, $order['products']);
-        $this->assertSame('Pizza-Set', $order['products'][0]['title']);
+        $this->assertSame('Multi-Part Set', $order['products'][0]['title']);
         $this->assertSame(20.0, $order['products'][0]['price']);
         $this->assertCount(1, $shipment);
         $this->assertSame($order['products'][0]['variant_id'], $shipment[0]['variant_id']);
@@ -177,14 +177,14 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
 
     public function testBundleParentWithOwnProductKeepsItsIdentity(): void
     {
-        $bundleProduct = $this->product('SO_070803_1X');
-        $bundle = $this->lineItem('bill-of-materials', 'Fior di Latte', 6.89, null, $bundleProduct);
-        $stock = $this->lineItem('product', '[BESTAND] Fior di Latte', 0.0, $bundle->getId(), $this->product('X'));
+        $bundleProduct = $this->product('BUNDLE-1X');
+        $bundle = $this->lineItem('bill-of-materials', 'Bundle Product', 6.89, null, $bundleProduct);
+        $stock = $this->lineItem('product', '[BESTAND] Bundle Product', 0.0, $bundle->getId(), $this->product('X'));
 
         $result = $this->call('readLineItems', new OrderLineItemCollection([$bundle, $stock]));
 
         $this->assertCount(1, $result['products']);
-        $this->assertSame('SO_070803_1X', $result['products'][0]['sku']);
+        $this->assertSame('BUNDLE-1X', $result['products'][0]['sku']);
         $this->assertSame($bundleProduct->getId(), $result['products'][0]['variant_id']);
     }
 
