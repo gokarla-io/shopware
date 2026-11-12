@@ -931,31 +931,33 @@ class OrderSubscriber implements EventSubscriberInterface
 
     /**
      * Build the Karla product payload for a root line item. Label, quantity and
-     * price come from the root; when the root has no product of its own (a bundle
-     * container), the product identity and image come from its product item (see below).
+     * price come from the root. A root without a product of its own (a bundle
+     * container) keeps its own referenced ID as identity, so the backend resolves
+     * the bundle and not a stock child; only when it has no referenced ID does it
+     * borrow the identity of its first product item. Its image comes from that item.
      *
      * @param list<OrderLineItemEntity> $productItems product/deposit line items under this root
      * @return array<string, mixed>
      */
     private function buildProductPayload(OrderLineItemEntity $lineItem, array $productItems): array
     {
-        // A container without its own product borrows identity from a product item: always
-        // when it has exactly one, and from the first one when it has no referenced ID either.
         $identity = $lineItem;
-        if (
-            ! $lineItem->getProduct() instanceof ProductEntity
-            && $productItems !== []
-            && (count($productItems) === 1 || $lineItem->getReferencedId() === null)
-        ) {
-            // Pick the first item by position (then ID) so the identity is stable across re-syncs.
+        $product = $lineItem->getProduct();
+        $imageProduct = null;
+        if (! $product instanceof ProductEntity && $productItems !== []) {
+            // First item by position (then ID), so the pick is stable across re-syncs.
             usort($productItems, static fn (OrderLineItemEntity $x, OrderLineItemEntity $y): int
                 => [$x->getPosition(), $x->getId()] <=> [$y->getPosition(), $y->getId()]);
-            $identity = $productItems[0];
+            if ($lineItem->getReferencedId() === null) {
+                $identity = $productItems[0];
+            }
+            $imageProduct = $productItems[0]->getProduct();
         }
+        $imageProduct ??= $product;
 
         $payload = $identity->getPayload();
         $product = $identity->getProduct();
-        $cover = $product instanceof ProductEntity ? $product->getCover() : null;
+        $cover = $imageProduct instanceof ProductEntity ? $imageProduct->getCover() : null;
         $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
 
         // For Shopware: parent ID is the container, product ID is the variant

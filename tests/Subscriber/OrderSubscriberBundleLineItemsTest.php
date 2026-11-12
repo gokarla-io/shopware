@@ -135,12 +135,13 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
         $result = $this->call('readLineItems', $lineItems);
 
         $this->assertCount(2, $result['products']);
-        $this->assertSame(['SINGLE-1', 'BUNDLE-STOCK'], array_column($result['products'], 'sku'));
         $bundleProduct = $result['products'][1];
         $this->assertSame($bundle->getLabel(), $bundleProduct['title']);
         $this->assertSame(6.89, $bundleProduct['price']);
-        // No own product on the parent: identity comes from the single product child.
-        $this->assertSame($stock->getReferencedId(), $bundleProduct['variant_id']);
+        // The parent keeps its own referenced ID, so the backend never resolves the stock child.
+        $this->assertSame($bundle->getReferencedId(), $bundleProduct['variant_id']);
+        $this->assertNotSame($stock->getReferencedId(), $bundleProduct['variant_id']);
+        $this->assertNotContains('BUNDLE-STOCK', array_column($result['products'], 'sku'));
         $this->assertEqualsWithDelta(16.88, $result['subTotalPrice'], 0.0001);
     }
 
@@ -279,5 +280,18 @@ class OrderSubscriberBundleLineItemsTest extends TestCase
         $result = $this->call('readLineItems', new OrderLineItemCollection([$bundle, $partB, $partA]));
 
         $this->assertSame('PART-A', $result['products'][0]['sku']);
+    }
+
+    public function testBundleParentWithoutReferencedIdBorrowsChildIdentity(): void
+    {
+        $bundle = $this->lineItem('bill-of-materials', 'Bundle Product', 6.89);
+        $bundle->setReferencedId(null);
+        $stock = $this->lineItem('product', '[BESTAND] Bundle Product', 0.0, $bundle->getId(), $this->product('STOCK'));
+
+        $result = $this->call('readLineItems', new OrderLineItemCollection([$bundle, $stock]));
+
+        $this->assertSame('Bundle Product', $result['products'][0]['title']);
+        $this->assertSame('STOCK', $result['products'][0]['sku']);
+        $this->assertSame($stock->getReferencedId(), $result['products'][0]['variant_id']);
     }
 }
