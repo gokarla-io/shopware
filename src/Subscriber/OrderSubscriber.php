@@ -14,6 +14,7 @@ use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryCollection
 use Shopware\Core\Checkout\Order\Aggregate\OrderDelivery\OrderDeliveryEntity;
 use Shopware\Core\Checkout\Order\Aggregate\OrderDeliveryPosition\OrderDeliveryPositionCollection;
 use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemCollection;
+use Shopware\Core\Checkout\Order\Aggregate\OrderLineItem\OrderLineItemEntity;
 use Shopware\Core\Checkout\Order\OrderEntity;
 use Shopware\Core\Checkout\Order\OrderEvents;
 use Shopware\Core\Content\Media\MediaEntity;
@@ -98,9 +99,11 @@ class OrderSubscriber implements EventSubscriberInterface
     private array $allowedDeliveryStatuses = [];
 
     /**
-     * @var string
+     * Line item types sent to Karla as products: `product` plus the configured deposit type.
+     *
+     * @var list<string>
      */
-    private string $depositLineItemType;
+    private array $productLineItemTypes;
 
     /**
      * @var array
@@ -216,9 +219,8 @@ class OrderSubscriber implements EventSubscriberInterface
         }
 
         // Mappings Configuration
-        $this->depositLineItemType = $systemConfigService->get(
-            'KarlaDelivery.config.depositLineItemType'
-        );
+        $depositLineItemType = $systemConfigService->get('KarlaDelivery.config.depositLineItemType');
+        $this->productLineItemTypes = array_values(array_filter(['product', $depositLineItemType]));
 
         // Sales Channel Mapping Configuration
         $salesChannelMappingConfig = $systemConfigService->get(
@@ -639,7 +641,7 @@ class OrderSubscriber implements EventSubscriberInterface
                 continue;
             }
 
-            $deliveryProducts = $this->readDeliveryPositions($delivery->getPositions());
+            $deliveryProducts = $this->readDeliveryPositions($delivery->getPositions(), $lineItemDetails);
             if ($this->debugMode) {
                 $this->logger->debug('Delivery included in tracking sync', [
                     ...$deliveryLogContext,
@@ -823,63 +825,67 @@ class OrderSubscriber implements EventSubscriberInterface
 
     /**
      * Parse order line items
+     *
+     * Products are emitted per root line item: every product/deposit line item is
+     * walked up to its root, and each root is sent once. Bundle plugins (e.g. a
+     * "Stückliste") put the price on a parent of a custom type and add €0.00
+     * product children for stock, so the parent is what the customer bought.
+     *
      * @param OrderLineItemCollection $lineItems
      * @return array
      */
     private function readLineItems(OrderLineItemCollection $lineItems)
     {
-        $products = [];
         $discounts = [];
-        $subTotalPrice = 0.0;
         $discountPrice = 0.0;
+        $rootIdByLineItemId = [];
+        $rootsById = [];
+        $productItemsByRootId = [];
 
         foreach ($lineItems as $lineItem) {
             $payload = $lineItem->getPayload();
-            if (in_array($lineItem->getType(), ['product', $this->depositLineItemType])) {
-                $subTotalPrice += $lineItem->getTotalPrice();
-                $product = $lineItem->getProduct();
-                $cover = $product instanceof ProductEntity ? $product->getCover() : null;
-                $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
-
-                // Determine product_id and variant_id
-                // For Shopware: parent ID is the container, product ID is the variant
-                $productId = $lineItem->getReferencedId(); // The actual product/variant ID
-
-                // Try to get parent ID from payload first, then from product entity
-                $parentId = null;
-                if (is_array($payload) && isset($payload['parentId'])) {
-                    $parentId = $payload['parentId'];
-                } elseif ($product instanceof ProductEntity) {
-                    $parentId = $product->getParentId();
-                }
-
-                $karlaProductId = $parentId ?? $productId; // Use parent if exists, else self
-                $karlaVariantId = $productId; // The actual variant/product ID
-
-                $products[] = [
-                 'product_id' => $karlaProductId,
-                 'variant_id' => $karlaVariantId,
-                 'sku' => $product instanceof ProductEntity ? $product->getProductNumber() : $lineItem->getReferencedId(),
-                 'title' => $lineItem->getLabel(),
-                 'quantity' => $lineItem->getQuantity(),
-                 'price' => $lineItem->getUnitPrice(),
-                 'images' => $cover instanceof ProductMediaEntity ? [[
-                  'src' => $media instanceof MediaEntity ? $media->getUrl() : null,
-                  'alt' => $media instanceof MediaEntity ? $media->getAlt() : null,
-                 ]] : [],
-                ];
-            } elseif ($lineItem->getType() === 'promotion') {
+            if ($lineItem->getType() === 'promotion') {
                 $discountPrice += abs($lineItem->getTotalPrice());
                 $discounts[] = [
                 'code' => is_array($payload) ? $payload['code'] : "",
                 'amount' => $lineItem->getTotalPrice(),
                 'type' => is_array($payload) ? $payload['discountType'] : null,
                 ];
+            } elseif ($this->isProductType($lineItem)) {
+                // Walk up to the root; the visited guard stops on a malformed parent cycle.
+                $path = [$lineItem->getId() => $lineItem];
+                $root = $lineItem;
+                while (($parentId = $root->getParentId()) !== null
+                    && ! isset($path[$parentId])
+                    && ($parent = $lineItems->get($parentId)) instanceof OrderLineItemEntity) {
+                    $root = $path[$parentId] = $parent;
+                }
+                if ($parentId !== null && isset($path[$parentId])) {
+                    // Malformed parent cycle: treat the item as its own root so the result is deterministic.
+                    $root = $lineItem;
+                    $path = [$lineItem->getId() => $lineItem];
+                }
+                // Map every visited item (incl. intermediate bundles) so any delivery position resolves.
+                foreach ($path as $visitedId => $_) {
+                    $rootIdByLineItemId[$visitedId] = $root->getId();
+                }
+                $rootsById[$root->getId()] = $root;
+                $productItemsByRootId[$root->getId()][] = $lineItem;
             }
         }
 
+        $productsByRootId = [];
+        $subTotalPrice = 0.0;
+        foreach ($productItemsByRootId as $rootId => $productItems) {
+            $root = $rootsById[$rootId];
+            $subTotalPrice += $root->getTotalPrice();
+            $productsByRootId[$rootId] = $this->buildProductPayload($root, $productItems);
+        }
+
         return [
-        'products' => $products,
+        'products' => array_values($productsByRootId),
+        'productsByRootId' => $productsByRootId,
+        'rootIdByLineItemId' => $rootIdByLineItemId,
         'discounts' => $discounts,
         'subTotalPrice' => $subTotalPrice,
         'discountPrice' => $discountPrice,
@@ -888,52 +894,100 @@ class OrderSubscriber implements EventSubscriberInterface
 
     /**
      * Parse products from a delivery position
+     *
+     * Each position reuses the product of its root line item from readLineItems,
+     * so a shipment carries the same products as the order even when the position
+     * points at a bundle parent of a custom type or at one of its children.
+     *
      * @param OrderDeliveryPositionCollection $deliveryPositions
+     * @param array $lineItemDetails result of readLineItems for the same order
      * @return array
      */
-    private function readDeliveryPositions(OrderDeliveryPositionCollection $deliveryPositions)
+    private function readDeliveryPositions(OrderDeliveryPositionCollection $deliveryPositions, array $lineItemDetails)
     {
         $products = [];
 
         foreach ($deliveryPositions as $deliveryPosition) {
             $lineItem = $deliveryPosition->getOrderLineItem();
-            if ($lineItem->getType() === 'product') {
-                $payload = $lineItem->getPayload();
-                $product = $lineItem->getProduct();
-                $cover = $product instanceof ProductEntity ? $product->getCover() : null;
-                $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
-
-                // Determine product_id and variant_id
-                // For Shopware: parent ID is the container, product ID is the variant
-                $productId = $lineItem->getReferencedId(); // The actual product/variant ID
-
-                // Try to get parent ID from payload first, then from product entity
-                $parentId = null;
-                if (is_array($payload) && isset($payload['parentId'])) {
-                    $parentId = $payload['parentId'];
-                } elseif ($product instanceof ProductEntity) {
-                    $parentId = $product->getParentId();
-                }
-
-                $karlaProductId = $parentId ?? $productId; // Use parent if exists, else self
-                $karlaVariantId = $productId; // The actual variant/product ID
-
-                $products[] = [
-                 'product_id' => $karlaProductId,
-                 'variant_id' => $karlaVariantId,
-                 'sku' => $product instanceof ProductEntity ? $product->getProductNumber() : $lineItem->getReferencedId(),
-                 'title' => $lineItem->getLabel(),
-                 'quantity' => $lineItem->getQuantity(),
-                 'price' => $lineItem->getUnitPrice(),
-                 'images' => $cover instanceof ProductMediaEntity ? [[
-                  'src' => $media instanceof MediaEntity ? $media->getUrl() : null,
-                  'alt' => $media instanceof MediaEntity ? $media->getAlt() : null,
-                 ]] : [],
-                ];
+            if ($lineItem === null) {
+                continue;
+            }
+            $rootId = $lineItemDetails['rootIdByLineItemId'][$lineItem->getId()] ?? null;
+            if ($rootId !== null) {
+                $products[$rootId] = $lineItemDetails['productsByRootId'][$rootId];
+            } elseif ($this->isProductType($lineItem)) {
+                // Line item not part of the loaded order line items: send it as is.
+                $products[$lineItem->getId()] = $this->buildProductPayload($lineItem, [$lineItem]);
             }
         }
 
-        return $products;
+        return array_values($products);
+    }
+
+    private function isProductType(OrderLineItemEntity $lineItem): bool
+    {
+        return in_array($lineItem->getType(), $this->productLineItemTypes, true);
+    }
+
+    /**
+     * Build the Karla product payload for a root line item. Label, quantity and
+     * price come from the root. A root without a product of its own (a bundle
+     * container) keeps its own referenced ID as identity, so the backend resolves
+     * the bundle and not a stock child; only when it has no referenced ID does it
+     * borrow the identity of its first product item. Its image comes from that item.
+     *
+     * @param list<OrderLineItemEntity> $productItems product/deposit line items under this root
+     * @return array<string, mixed>
+     */
+    private function buildProductPayload(OrderLineItemEntity $lineItem, array $productItems): array
+    {
+        $identity = $lineItem;
+        $product = $lineItem->getProduct();
+        $imageProduct = null;
+        if (! $product instanceof ProductEntity && $productItems !== []) {
+            // First item by position (then ID), so the pick is stable across re-syncs.
+            usort($productItems, static fn (OrderLineItemEntity $x, OrderLineItemEntity $y): int
+                => [$x->getPosition(), $x->getId()] <=> [$y->getPosition(), $y->getId()]);
+            if ($lineItem->getReferencedId() === null) {
+                $identity = $productItems[0];
+            }
+            $imageProduct = $productItems[0]->getProduct();
+        }
+        $imageProduct ??= $product;
+
+        $payload = $identity->getPayload();
+        $product = $identity->getProduct();
+        $cover = $imageProduct instanceof ProductEntity ? $imageProduct->getCover() : null;
+        $media = $cover instanceof ProductMediaEntity ? $cover->getMedia() : null;
+
+        // For Shopware: parent ID is the container, product ID is the variant
+        $productId = $identity->getReferencedId(); // The actual product/variant ID
+
+        // Try to get parent ID from payload first, then from product entity
+        $parentId = null;
+        if (is_array($payload) && isset($payload['parentId'])) {
+            $parentId = $payload['parentId'];
+        } elseif ($product instanceof ProductEntity) {
+            $parentId = $product->getParentId();
+        }
+
+        $sku = $product instanceof ProductEntity ? $product->getProductNumber() : null;
+        if ($sku === null && is_array($payload) && isset($payload['productNumber'])) {
+            $sku = $payload['productNumber'];
+        }
+
+        return [
+         'product_id' => $parentId ?? $productId, // Use parent if exists, else self
+         'variant_id' => $productId, // The actual variant/product ID
+         'sku' => $sku ?? $identity->getReferencedId(),
+         'title' => $lineItem->getLabel(),
+         'quantity' => $lineItem->getQuantity(),
+         'price' => $lineItem->getUnitPrice(),
+         'images' => $cover instanceof ProductMediaEntity ? [[
+          'src' => $media instanceof MediaEntity ? $media->getUrl() : null,
+          'alt' => $media instanceof MediaEntity ? $media->getAlt() : null,
+         ]] : [],
+        ];
     }
 
     /**
